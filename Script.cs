@@ -24,6 +24,7 @@ List<List<IMyTextPanel>> _panels = new List<List<IMyTextPanel>>(SIZE_PANELS);
 List<string> _panel_text = new List<string>(SIZE_PANELS) { "", "", "", "", "" };
 
 double time_total = 0.0;
+double last_run_time_ms_tally = 0.0;
 
 /* Reused single-run state objects, only global to avoid realloc/gc-thrashing */
 // FIXME: _chart here? _panel?
@@ -59,6 +60,8 @@ public void Save() {
 
 public void Main(string argument, UpdateType updateSource) {
     try {
+        // Tally up all invocation times and record them as one on the non-command runs.
+        last_run_time_ms_tally += Runtime.LastRunTimeMs;
         if ((updateSource & UpdateType.Update100) != 0) {
 	    //DateTime start_time = DateTime.Now;
             // FIXME: System.Diagnostics.Stopwatch
@@ -67,13 +70,14 @@ public void Main(string argument, UpdateType updateSource) {
 
 	    _cycles++;
 
-	    Chart.Find(CHART_TIME).AddDatapoint(TimeAsUsec(Runtime.LastRunTimeMs));
+	    Chart.Find(CHART_TIME).AddDatapoint(TimeAsUsec(last_run_time_ms_tally));
             if (_cycles > 1) {
-                time_total += Runtime.LastRunTimeMs;
+                time_total += last_run_time_ms_tally;
                 if (_cycles == 201) {
                     Warning($"Total time after 200 cycles: {time_total}ms.");
                 }
             }
+            last_run_time_ms_tally = 0.0;
 
             ClearPanels(PANELS_DEBUG);
 
