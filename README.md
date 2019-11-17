@@ -140,13 +140,19 @@ Passing data to Zephyr Industries Bar Charts is done by invoking the script with
 ## Sending data from other scripts
 
 TODO: document this
+```C#
+GridTerminalSystem.GetBlocksOfType<IMyProgrammableBlock>(_chart_blocks, block => block.CustomName.Contains("Zephyr Industries Bar Charts"));
+foreach (IMyProgrammableBlock chart_block in _chart_blocks) {
+    _chart_blocks[i].TryRun("add \"Test Chart\" 5.6");
+}
+```
 
 ### List of chart commands
 
 Command | Arguments | Description
 :---: | :---: | :---
-create | "<chart title>" "<chart units>" | Creates or updates a chart to have the given title and units.
-add | "<chart title>" <double value> | Creates a new datapoint in the series and advances the chart by one step.
+create | "chart title" "chart units" | Creates or updates a chart to have the given title and units.
+add | "chart title" value | Creates a new datapoint in the series and advances the chart by one step. Values will be converted to doubles.
 
 ## Contributing:
 
