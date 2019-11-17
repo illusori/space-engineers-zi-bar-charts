@@ -101,8 +101,9 @@ public void Main(string argument, UpdateType updateSource) {
             Log($"Charts: {Chart.Count}, DrawBuffers: {Chart.BufferCount}");
             FlushToPanels(PANELS_DEBUG);
         }
-        if ((updateSource & (UpdateType.Trigger | UpdateType.Terminal)) != 0) {
-            Log($"Running command '{argument}'.");
+        //if ((updateSource & (UpdateType.Trigger | UpdateType.Terminal)) != 0) {
+        if (argument != "") {
+            //Log($"Running command '{argument}'.");
             _arguments = ParseQuotedArguments(argument);
             //foreach (string word in _arguments) {
             //    Warning($"Parsed out word '{word}'.");
