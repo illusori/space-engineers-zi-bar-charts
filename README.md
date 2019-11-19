@@ -120,10 +120,12 @@ show_cur | true | Should the current series value be displayed in the bottom bor
 show_avg | true | Should the average value of the displayed bars be shown?
 show_max | false | Should the max value of the displayed bars be shown?
 show_scale | true | Should the scale (max Y point) be displayed in the bottom border?
+title | chart name | Title to display for the chart.
+unit | varies | Unit to use for display. (Note: Doesn't change chart scaling, just the unit label.)
 
-The scale is automatically set by some heuristics that sorta make sense and seem to work for me.
+FIXME: (not currently true) The scale is automatically set by some heuristics that sorta make sense and seem to work for me.
 
-There's currently no way to set the title to be something other than the name of the series.
+The scale is currently set to the maximum value seen in the recorded chart history of the past 100 datapoints.
 
 Setting x/y/width/height values that are outside the bounds of the display will stop the script, you'll need to fix the values then recompile the script. As I said at the top, it isn't very user-friendly right now.
 
@@ -142,6 +144,7 @@ Passing data to Zephyr Industries Bar Charts is done by invoking the script with
 TODO: document this
 ```C#
 GridTerminalSystem.GetBlocksOfType<IMyProgrammableBlock>(_chart_blocks, block => block.CustomName.Contains("Zephyr Industries Bar Charts"));
+// Not sure running more than one instance is a smart idea, but you do you.
 foreach (IMyProgrammableBlock chart_block in _chart_blocks) {
     _chart_blocks[i].TryRun("add \"Test Chart\" 5.6");
 }
@@ -153,6 +156,13 @@ Command | Arguments | Description
 :---: | :---: | :---
 create | "chart title" "chart units" | Creates or updates a chart to have the given title and units.
 add | "chart title" value | Creates a new datapoint in the series and advances the chart by one step. Values will be converted to doubles.
+
+## Future plans
+
+Sticking a list of future plans in a README is a sure-fire way of ensuring they never get done, but nevertheless:
+
+* Spreading the load of writing charts across multiple updates rather than all charts in one batch. Somewhat complicated by the fact that charts can share displays and a refresh for each chart on a display is required when any one is written.
+* Rewriting to use sprites instead of text. The "new" sprites stuff in LCDs looks awesome, and compositing sprites should be a lot faster than piecemeal stringbuilding since it gets rid of stupid loops within loops within loops and pushes the work out to the graphics engine.
 
 ## Contributing:
 

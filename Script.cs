@@ -100,7 +100,7 @@ public void Main(string argument, UpdateType updateSource) {
             for (int i = 1; i < 16; i++) {
                 long load = (long)Chart.Find(CHART_LOAD).Datapoint(-i);
                 long time = (long)Chart.Find(CHART_TIME).Datapoint(-i);
-                Log($"  [T-{i,-2}] Load {load} in {time}us");
+                Log($"  [T-{i,-2}] Load {load}% in {time}us");
             }
             Log($"Charts: {Chart.Count}, DrawBuffers: {Chart.BufferCount}");
             FlushToPanels(PANELS_DEBUG);
@@ -343,6 +343,10 @@ public class ViewPort {
         Buffer.Save();
     }
 
+    public void Reset() {
+        Buffer.Reset();
+    }
+
     public void Write(int x, int y, string s) {
         // Yeah, no bounds checking. Sue me.
         Buffer.Write(offsetX + x, offsetY + y, s);
@@ -351,14 +355,17 @@ public class ViewPort {
 
 public class ChartOptions {
     public bool Horizontal, ShowTitle, ShowCur, ShowAvg, ShowMax, ShowScale;
+    public string Title, Unit;
 
-    public ChartOptions(bool horizontal = true, bool show_title = true, bool show_cur = true, bool show_avg = true, bool show_max = false, bool show_scale = true) {
+    public ChartOptions(bool horizontal = true, bool show_title = true, bool show_cur = true, bool show_avg = true, bool show_max = false, bool show_scale = true, string title = "", string unit = "") {
         Horizontal = horizontal;
         ShowTitle = show_title;
         ShowCur = show_cur;
         ShowAvg = show_avg;
         ShowMax = show_max;
         ShowScale = show_scale;
+        Title = title;
+        Unit = unit;
     }
 }
 
@@ -379,6 +386,70 @@ public class ChartDisplay {
     public ChartDisplay(ViewPort viewport, ChartOptions options) {
         Viewport = viewport;
         Options = options;
+
+        ConfigureViewport();
+    }
+
+    public void ConfigureViewport() {
+        string label;
+	Viewport.Reset();
+	Viewport.Write(0, 0, "." + new String('-', Viewport.X - 2) + ".");
+        if (Options.ShowTitle) {
+            label = $"[{Options.Title}]";
+            if (label.Length < Viewport.X - 2) {
+                Viewport.Write((Viewport.X - label.Length) / 2, 0, label);
+            }
+        }
+	for (int i = 1; i < Viewport.Y - 1; i++) {
+            // TODO: might need to blank the betweens for reconfigures
+	    Viewport.Write(0, i, "|");
+	    Viewport.Write(Viewport.X - 1, i, "|");
+	}
+	Viewport.Write(0, Viewport.Y - 1, "." + new String('-', Viewport.X - 2) + ".");
+        if (Options.ShowCur || Options.ShowAvg || Options.ShowMax || Options.ShowScale) {
+            List<string> segments = new List<string>(2);
+            int offset = 1;
+            if (Options.ShowCur) {
+                label = $"cur:     {Options.Unit}";
+                segments.Add(label);
+                CurOffset = offset + 4;
+                offset += label.Length + 1;
+            }
+            if (Options.ShowAvg) {
+                label = $"avg:     {Options.Unit}";
+                segments.Add(label);
+                AvgOffset = offset + 4;
+                offset += label.Length + 1;
+            }
+            if (Options.ShowMax) {
+                label = $"max:     {Options.Unit}";
+                segments.Add(label);
+                MaxOffset = offset + 4;
+                offset += label.Length + 1;
+            }
+            if (Options.ShowScale) {
+                string dim = Options.Horizontal ? "Y" : "X";
+                label = $"{dim}:     {Options.Unit}";
+                segments.Add(label);
+                ScaleOffset = offset + 2;
+                offset += label.Length + 1;
+            }
+            label = "[" + string.Join(" ", segments) + "]";
+            if (label.Length < Viewport.X - 2) {
+                offset = (Viewport.X - label.Length) / 2;
+                Viewport.Write(offset, Viewport.Y - 1, label);
+                CurOffset += offset;
+                AvgOffset += offset;
+                MaxOffset += offset;
+                ScaleOffset += offset;
+            } else {
+                CurOffset = null;
+                AvgOffset = null;
+                MaxOffset = null;
+                ScaleOffset = null;
+            }
+        }
+	Viewport.Save();
     }
 }
 
@@ -433,7 +504,10 @@ public class Chart {
 
     static public Chart Create(string title, string unit) {
         Chart chart = Find(title);
-        chart.Unit = unit;
+        if (chart.Unit != unit) {
+            chart.Unit = unit;
+            chart.ConfigureViewPorts();
+        }
         return chart;
     }
 
@@ -454,71 +528,20 @@ public class Chart {
     }
 
     public void AddViewPort(ViewPort viewport, ChartOptions options) {
-        string label;
         ChartDisplay display = new ChartDisplay(viewport, options);
 
         displays.Add(display);
-
-	viewport.Write(0, 0, "." + new String('-', viewport.X - 2) + ".");
-        if (options.ShowTitle) {
-            label = $"[{Title}]";
-            if (label.Length < viewport.X - 2) {
-                viewport.Write((viewport.X - label.Length) / 2, 0, label);
-            }
-        }
-	for (int i = 1; i < viewport.Y - 1; i++) {
-	    viewport.Write(0, i, "|");
-	    viewport.Write(viewport.X - 1, i, "|");
-	}
-	viewport.Write(0, viewport.Y - 1, "." + new String('-', viewport.X - 2) + ".");
-        if (options.ShowCur || options.ShowAvg || options.ShowMax || options.ShowScale) {
-            List<string> segments = new List<string>(2);
-            int offset = 1;
-            if (options.ShowCur) {
-                label = $"cur:     {Unit}";
-                segments.Add(label);
-                display.CurOffset = offset + 4;
-                offset += label.Length + 1;
-            }
-            if (options.ShowAvg) {
-                label = $"avg:     {Unit}";
-                segments.Add(label);
-                display.AvgOffset = offset + 4;
-                offset += label.Length + 1;
-            }
-            if (options.ShowMax) {
-                label = $"max:     {Unit}";
-                segments.Add(label);
-                display.MaxOffset = offset + 4;
-                offset += label.Length + 1;
-            }
-            if (options.ShowScale) {
-                string dim = options.Horizontal ? "Y" : "X";
-                label = $"{dim}:     {Unit}";
-                segments.Add(label);
-                display.ScaleOffset = offset + 2;
-                offset += label.Length + 1;
-            }
-            label = "[" + string.Join(" ", segments) + "]";
-            if (label.Length < viewport.X - 2) {
-                offset = (viewport.X - label.Length) / 2;
-                viewport.Write(offset, viewport.Y - 1, label);
-                display.CurOffset += offset;
-                display.AvgOffset += offset;
-                display.MaxOffset += offset;
-                display.ScaleOffset += offset;
-            } else {
-                display.CurOffset = null;
-                display.AvgOffset = null;
-                display.MaxOffset = null;
-                display.ScaleOffset = null;
-            }
-        }
-	viewport.Save();
     }
-
     public void AddBuffer(DrawBuffer buffer, int offset_x, int offset_y, int x, int y, ChartOptions options) {
         AddViewPort(new ViewPort(buffer, offset_x, offset_y, x, y), options);
+    }
+
+    public void ConfigureViewPorts() {
+        for (int d = 0, sz = displays.Count; d < sz; d++) {
+            displays[d].Options.Title = Title; // Ew. Codesmell.
+            displays[d].Options.Unit = Unit;
+            displays[d].ConfigureViewport();
+        }
     }
 
     public void AddBuffer(DrawBuffer buffer, int offset_x, int offset_y, int x, int y) {
@@ -713,7 +736,7 @@ public class Chart {
 	Chart chart;
 	int width, height, x, y;
 	bool horizontal, show_title, show_cur, show_avg, show_max, show_scale;
-	string name;
+	string name, title, unit;
 	for (int i = 0, sz = panels.Count; i < sz; i++) {
 	    IMyTextPanel panel = panels[i];
 	    long id = panel.EntityId;
@@ -761,11 +784,13 @@ public class Chart {
 		show_avg = _ini.Get(section, "show_avg").ToBoolean(true);
 		show_max = _ini.Get(section, "show_max").ToBoolean(false);
 		show_scale = _ini.Get(section, "show_scale").ToBoolean(true);
+                title = _ini.Get(section, "title").ToString(name);
+                unit = _ini.Get(section, "unit").ToString(chart.Unit); // FIXME: prob gets overwritten by create commands
 
 		// Hmm, removing it here means we can't have multiples of same chart on same panel
 		// TODO: maybe keep track of those chart names we've removed already in the sections loop?
 		chart.RemoveDisplaysForBuffer(buffer);
-		chart.AddBuffer(buffer, x, y, width, height, new ChartOptions(horizontal, show_title, show_cur, show_avg, show_max, show_scale));
+		chart.AddBuffer(buffer, x, y, width, height, new ChartOptions(horizontal, show_title, show_cur, show_avg, show_max, show_scale, title, unit));
 	    }
 	}
 	// Prune old ids in _chart_buffers
