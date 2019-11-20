@@ -4,6 +4,9 @@ string _script_version = "1.0.0";
 string _script_title = null;
 string _script_title_nl = null;
 
+const string PUBSUB_SCRIPT_NAME = "Zephyr Industries PubSub Controller";
+const string PUBSUB_ID = "zi.bar-charts";
+
 const int HISTORY     = 100;
 const int SAMPLES     = 10;
 
@@ -15,13 +18,14 @@ const int SIZE_PANELS  = 3;
 const string CHART_TIME = "Chart Exec Time";
 const string CHART_LOAD = "Chart Instr Load";
 
-List<string> _panel_tags = new List<string>(SIZE_PANELS) { "@DebugChartDisplay", "@WarningChartDisplay", "@ChartDisplay" };
+List<string> _panel_tags = new List<string>(SIZE_PANELS) { "@ChartDebugDisplay", "@ChartWarningDisplay", "@ChartDisplay" };
 
 /* Genuine global state */
 int _cycles = 0;
 
 List<List<IMyTextPanel>> _panels = new List<List<IMyTextPanel>>(SIZE_PANELS);
 List<string> _panel_text = new List<string>(SIZE_PANELS) { "", "", "", "", "" };
+List<IMyProgrammableBlock> _pubsub_blocks = new List<IMyProgrammableBlock>();
 
 double time_total = 0.0;
 double last_run_time_ms_tally = 0.0;
@@ -45,6 +49,7 @@ public Program() {
     Chart.Create(CHART_LOAD, "%");
 
     FindPanels();
+    FindPubSubBlocks();
 
     if (!Me.CustomName.Contains(_script_name)) {
         // Update our block to include our script name
@@ -86,6 +91,9 @@ public void Main(string argument, UpdateType updateSource) {
             if ((_cycles % 30) == 0) {
                 FindPanels();
             }
+            if ((_cycles % 30) == 1) {
+                FindPubSubBlocks();
+            }
 
             Chart.DrawCharts();
 
@@ -114,7 +122,13 @@ public void Main(string argument, UpdateType updateSource) {
             //}
             // TODO: should require source script name as argument?
             if (_arguments.Count > 0) {
-                if (_arguments[0] == "add") {
+                if (_arguments[0] == "event") {
+                    if (_arguments[2] == "datapoint.issue") {
+                        Chart.Find(_arguments[3]).AddDatapoint(double.Parse(_arguments[4], System.Globalization.CultureInfo.InvariantCulture));
+                    } else if (_arguments[2] == "dataset.create") {
+                        Chart.Create(_arguments[3], _arguments[4]);
+                    }
+                } else if (_arguments[0] == "add") {
                     // add "chart name" value
                     if (_arguments.Count != 3) {
                         Warning("Syntax: add \"<chart name>\" <double value>");
@@ -185,6 +199,21 @@ public List<string> ParseQuotedArguments(string argument) {
 public double TimeAsUsec(double t) {
     //return (t * 1000.) / TimeSpan.TicksPerMillisecond;
     return t * 1000.0;
+}
+
+public void FindPubSubBlocks() {
+    _pubsub_blocks.Clear();
+    GridTerminalSystem.GetBlocksOfType<IMyProgrammableBlock>(_pubsub_blocks, block => block.CustomName.Contains(PUBSUB_SCRIPT_NAME));
+    IssueEvent("pubsub.register", $"datapoint.issue {Me.EntityId}");
+    IssueEvent("pubsub.register", $"dataset.create {Me.EntityId}");
+}
+
+public void IssueEvent(string event_name, string event_args) {
+    foreach (IMyProgrammableBlock block in _pubsub_blocks) {
+        if (block != null) {
+            block.TryRun($"event {PUBSUB_ID} {event_name} {event_args}");
+        }
+    }
 }
 
 public void FindPanels() {
