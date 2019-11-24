@@ -1,5 +1,5 @@
 ﻿string _script_name = "Zephyr Industries Bar Charts";
-string _script_version = "1.0.0";
+string _script_version = "1.0.1";
 
 string _script_title = null;
 string _script_title_nl = null;
@@ -15,8 +15,11 @@ const int PANELS_WARN  = 1;
 const int PANELS_CHART = 2;
 const int SIZE_PANELS  = 3;
 
-const string CHART_TIME = "Chart Exec Time";
+const string CHART_EXEC_TIME = "Chart Exec Time";
+const string CHART_MAIN_TIME = "Chart Main Time";
+const string CHART_SUBS_TIME = "Chart Subs Time";
 const string CHART_LOAD = "Chart Instr Load";
+const string CHART_DATAPOINTS = "Chart Data In";
 
 List<string> _panel_tags = new List<string>(SIZE_PANELS) { "@ChartDebugDisplay", "@ChartWarningDisplay", "@ChartDisplay" };
 
@@ -27,8 +30,11 @@ List<List<IMyTextPanel>> _panels = new List<List<IMyTextPanel>>(SIZE_PANELS);
 List<string> _panel_text = new List<string>(SIZE_PANELS) { "", "", "", "", "" };
 List<IMyProgrammableBlock> _pubsub_blocks = new List<IMyProgrammableBlock>();
 
-double time_total = 0.0;
-double last_run_time_ms_tally = 0.0;
+double _time_total = 0.0;
+double _last_run_time_ms_main_tally = 0.0;
+double _last_run_time_ms_subs_tally = 0.0;
+bool _last_run_main_loop = false;
+int _last_run_datapoints = 0;
 
 /* Reused single-run state objects, only global to avoid realloc/gc-thrashing */
 // FIXME: _chart here? _panel?
@@ -45,8 +51,11 @@ public Program() {
     }
 
     // Create load/time charts
-    Chart.Create(CHART_TIME, "us");
+    Chart.Create(CHART_EXEC_TIME, "us");
+    Chart.Create(CHART_MAIN_TIME, "us");
+    Chart.Create(CHART_SUBS_TIME, "us");
     Chart.Create(CHART_LOAD, "%");
+    Chart.Create(CHART_DATAPOINTS, "");
 
     FindPanels();
     FindPubSubBlocks();
@@ -66,7 +75,12 @@ public void Save() {
 public void Main(string argument, UpdateType updateSource) {
     try {
         // Tally up all invocation times and record them as one on the non-command runs.
-        last_run_time_ms_tally += Runtime.LastRunTimeMs;
+        if (_last_run_main_loop) {
+            _last_run_time_ms_main_tally += Runtime.LastRunTimeMs;
+            _last_run_main_loop = false;
+        } else {
+            _last_run_time_ms_subs_tally += Runtime.LastRunTimeMs;
+        }
         if ((updateSource & UpdateType.Update100) != 0) {
 	    //DateTime start_time = DateTime.Now;
             // FIXME: System.Diagnostics.Stopwatch
@@ -75,14 +89,20 @@ public void Main(string argument, UpdateType updateSource) {
 
 	    _cycles++;
 
-	    Chart.Find(CHART_TIME).AddDatapoint(TimeAsUsec(last_run_time_ms_tally));
+	    Chart.Find(CHART_EXEC_TIME).AddDatapoint(TimeAsUsec(_last_run_time_ms_main_tally + _last_run_time_ms_subs_tally));
+	    Chart.Find(CHART_MAIN_TIME).AddDatapoint(TimeAsUsec(_last_run_time_ms_main_tally));
+	    Chart.Find(CHART_SUBS_TIME).AddDatapoint(TimeAsUsec(_last_run_time_ms_subs_tally));
+	    Chart.Find(CHART_DATAPOINTS).AddDatapoint((double)_last_run_datapoints);
             if (_cycles > 1) {
-                time_total += last_run_time_ms_tally;
+                _time_total += _last_run_time_ms_main_tally + _last_run_time_ms_subs_tally;
                 if (_cycles == 201) {
-                    Warning($"Total time after 200 cycles: {time_total}ms.");
+                    Warning($"Total time after 200 cycles: {_time_total}ms.");
                 }
             }
-            last_run_time_ms_tally = 0.0;
+            _last_run_time_ms_main_tally = 0.0;
+            _last_run_time_ms_subs_tally = 0.0;
+            _last_run_datapoints = 0;
+            _last_run_main_loop = true;
 
             ClearPanels(PANELS_DEBUG);
 
@@ -99,55 +119,25 @@ public void Main(string argument, UpdateType updateSource) {
 
 	    Chart.Find(CHART_LOAD).AddDatapoint((double)Runtime.CurrentInstructionCount * 100.0 / (double)Runtime.MaxInstructionCount);
 
-            // FIXME: grab from Dataset.Datapoints
 	    long load_avg = (long)Chart.Find(CHART_LOAD).Avg;
-	    long time_avg = (long)Chart.Find(CHART_TIME).Avg;
-	    Log($"Load avg {load_avg}% in {time_avg}us");
+	    long time_avg = (long)Chart.Find(CHART_EXEC_TIME).Avg;
+	    long time_subs_avg = (long)Chart.Find(CHART_SUBS_TIME).Avg;
+	    long datapoints_tot = (long)Chart.Find(CHART_DATAPOINTS).Sum;
+	    Log($"[Cycle {_cycles}]\n  [Avg ] Load {load_avg}% in {time_avg}us (Rx: {time_subs_avg}us/{datapoints_tot} points)");
 
-            // Start at T-1 - exec time hasn't been updated yet.
-            for (int i = 1; i < 16; i++) {
+            for (int i = 0; i < 16; i++) {
                 long load = (long)Chart.Find(CHART_LOAD).Datapoint(-i);
-                long time = (long)Chart.Find(CHART_TIME).Datapoint(-i);
-                Log($"  [T-{i,-2}] Load {load}% in {time}us");
+                long time = (long)Chart.Find(CHART_EXEC_TIME).Datapoint(-i);
+                long time_subs = (long)Chart.Find(CHART_SUBS_TIME).Datapoint(-i);
+                long count_datapoints = (long)Chart.Find(CHART_DATAPOINTS).Datapoint(-i);
+                Log($"  [T-{i,-2}] Load {load}% in {time}us (Rx: {time_subs}us/{count_datapoints} points)");
             }
             Log($"Charts: {Chart.Count}, DrawBuffers: {Chart.BufferCount}");
             FlushToPanels(PANELS_DEBUG);
         }
         //if ((updateSource & (UpdateType.Trigger | UpdateType.Terminal)) != 0) {
         if (argument != "") {
-            //Log($"Running command '{argument}'.");
-            _arguments = ParseQuotedArguments(argument);
-            //foreach (string word in _arguments) {
-            //    Warning($"Parsed out word '{word}'.");
-            //}
-            // TODO: should require source script name as argument?
-            if (_arguments.Count > 0) {
-                if (_arguments[0] == "event") {
-                    if (_arguments[2] == "datapoint.issue") {
-                        Chart.Find(_arguments[3]).AddDatapoint(double.Parse(_arguments[4], System.Globalization.CultureInfo.InvariantCulture));
-                    } else if (_arguments[2] == "dataset.create") {
-                        Chart.Create(_arguments[3], _arguments[4]);
-                    }
-                } else if (_arguments[0] == "add") {
-                    // add "chart name" value
-                    if (_arguments.Count != 3) {
-                        Warning("Syntax: add \"<chart name>\" <double value>");
-                    } else {
-                        Chart.Find(_arguments[1]).AddDatapoint(double.Parse(_arguments[2], System.Globalization.CultureInfo.InvariantCulture));
-                    }
-                } else if (_arguments[0] == "create") {
-                    // create "chart name" "units"
-                    if (_arguments.Count != 3) {
-                        Warning("Syntax: create \"<chart name>\" \"<units>\"");
-                    } else {
-                        Chart.Create(_arguments[1], _arguments[2]);
-                    }
-                } else {
-                    Warning($"Unknown command '{_arguments[0]}'.");
-                }
-            } else {
-                Warning($"Couldn't parse arguments in '{argument}'.");
-            }
+            ProcessCommand(argument);
         }
     } catch (Exception e) {
         string mess = $"An exception occurred during script execution.\nException: {e}\n---";
@@ -164,6 +154,10 @@ public List<string> ParseQuotedArguments(string argument) {
     List<string> arguments = new List<string>();
     int? open = null;
     string word;
+
+    if (!argument.Contains("\"")) {
+        return words;
+    }
 
     for (int i = 0; i < words.Count; i++) {
         //Warning($"{i} Parsing word '{words[i]}'");
@@ -194,6 +188,45 @@ public List<string> ParseQuotedArguments(string argument) {
         }
     }
     return arguments;
+}
+
+public void ProcessCommand(string argument) {
+    //Log($"Running command '{argument}'.");
+    _arguments = ParseQuotedArguments(argument);
+    //foreach (string word in _arguments) {
+    //    Warning($"Parsed out word '{word}'.");
+    //}
+    // TODO: should require source script name as argument?
+    if (_arguments.Count == 0) {
+	Warning($"Couldn't parse arguments in '{argument}'.");
+        return;
+    }
+    if (_arguments[0] == "event") {
+        // FIXME: validation
+	if (_arguments[2] == "datapoint.issue") {
+	    Chart.Find(_arguments[3]).AddDatapoint(double.Parse(_arguments[4], System.Globalization.CultureInfo.InvariantCulture));
+	    _last_run_datapoints++;
+	} else if (_arguments[2] == "dataset.create") {
+	    Chart.Create(_arguments[3], _arguments[4]);
+	}
+    } else if (_arguments[0] == "add") {
+	// add "chart name" value
+	if (_arguments.Count != 3) {
+	    Warning("Syntax: add \"<chart name>\" <double value>");
+	} else {
+	    Chart.Find(_arguments[1]).AddDatapoint(double.Parse(_arguments[2], System.Globalization.CultureInfo.InvariantCulture));
+	    _last_run_datapoints++;
+	}
+    } else if (_arguments[0] == "create") {
+	// create "chart name" "units"
+	if (_arguments.Count != 3) {
+	    Warning("Syntax: create \"<chart name>\" \"<units>\"");
+	} else {
+	    Chart.Create(_arguments[1], _arguments[2]);
+	}
+    } else {
+	Warning($"Unknown command '{_arguments[0]}'.");
+    }
 }
 
 public double TimeAsUsec(double t) {
@@ -534,6 +567,7 @@ public class Chart {
     static public Chart Create(string title, string unit) {
         Chart chart = Find(title);
         if (chart.Unit != unit) {
+            // FIXME: make this default_unit and add default_title
             chart.Unit = unit;
             chart.ConfigureViewPorts();
         }
