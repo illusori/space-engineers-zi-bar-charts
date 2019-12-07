@@ -23,8 +23,8 @@ Small print: Zephyr Industries Bar Charts doesn't include charts to do any of th
 * Place on a Programmable Block.
 * The script will run automatically every 100 game updates, and scan for updates to your base every 300 game updates (~30-60 seconds).
 * Mark LCD panels by adding a tag to their name and on the next base scan the script will start using it.
-  * `@DebugChartDisplay` displays info useful for script development, including performance.
-  * `@WarningChartDisplay` displays any issues the script encountered.
+  * `@ChartDebugDisplay` displays info useful for script development, including performance.
+  * `@ChartWarningDisplay` displays any issues the script encountered.
   * `@ChartDisplay` will configure the display for charts. Configuration is a bit more complicated, see the *Chart Displays* section for more details.
 
 ## Chart Displays:
@@ -37,12 +37,14 @@ Some examples are probably a bit easier to understand. These examples use datase
 
 ### Basic Execution Time Chart
 
+FIXME: update screenshots.
+
 ![Simple Chart Example](simple_chart.jpg)
 
 Set the Custom Data to:
 
 ```
-[time]
+[Chart Exec Time]
 ```
 
 This creates one chart tracking the `time` series for script execution time, with the default options: fill the entire panel, have the bars aligned vertically and time horizontal.
@@ -52,16 +54,16 @@ This creates one chart tracking the `time` series for script execution time, wit
 ![Triple Chart Example](triple_chart.jpg)
 
 ```
-[power_stored]
-height=13
+[Stored Power]
+height=33
 
-[power_in]
-y=13
-height=11
+[Power In]
+y=33
+height=33
 
-[power_out]
-y=24
-height=11
+[Power Out]
+y=66
+height=33
 ```
 
 This places three charts onto one display folowing the `power_stored`, `power_in` and `power_out` series. It also overrides the default layout so that they tile one above the other taking up about a third of the height of the panel each and the full width.
@@ -71,19 +73,19 @@ This places three charts onto one display folowing the `power_stored`, `power_in
 ![A Complicated Abomination](mixing_it_all_together.jpg)
 
 ```
-[power_stored]
-height=13
+[Stored Power]
+height=33
 
-[cargo_free_volume]
-y=13
-height=11
+[Cargo Free]
+y=33
+height=33
 horizontal=false
 show_cur=false
 show_max=true
 
-[power_out]
-y=24
-height=11
+[Power Out]
+y=66
+height=33
 horizontal=false
 ```
 
@@ -97,22 +99,42 @@ Creates three charts on one display:
 
 Series name | Description
 --- | ---
-power_stored | How much power is stored in your batteries.
-power_in | How much power is entering your batteries.
-power_out | How much power is leaving your batteries.
-cargo_used_mass | How much mass (tonnes) of cargo is within all cargo containers.
-cargo_used_volume | How much volume (m3) is used within all cargo containers.
-cargo_free_volume | How much volume (m3) is free within all cargo containers.
-time | (debug) Microsecond timings of how long the script ran for on each invocation.
+Stored Power | How much power is stored in your batteries.
+Max Stored Power | How much power can be stored in your batteries.
+Power In | How much power is entering your batteries.
+Power Out | How much power is leaving your batteries.
+Cargo Mass | How much mass (tonnes) of cargo is within all cargo containers.
+Cargo Vol | How much volume (m3) is used within all cargo containers.
+Cargo Free | How much volume (m3) is free within all cargo containers.
+O2 Vol | How much volume (m3) is used within all oxygen tanks.
+O2 Free | How much volume (m3) is free within all oxygen tanks.
+H2 Vol | How much volume (m3) is used within all hydrogen tanks.
+H2 Free | How much volume (m3) is free within all hydrogen tanks.
+All Active Assemblers | How many assemblers (all types) are active.
+All Assemblers | How many assemblers (all types) in total are available.
+Active Assemblers | How many assemblers (full type) are active.
+Assemblers | How many assemblers (full type) are available.
+Active Basic Assemblers | How many basic assemblers are active.
+Basic Assemblers | How many basic assemblers are available.
+All Active Refineries | How many refineries (all types) are active.
+All Refineries | How many refineries (all types) are available.
+Active Refineries | How many refineries (full type) are active.
+Refineries | How many refineries (full type) are available.
+Active Basic Refineries | How many basic refineries are active.
+Basic Refineries | How many basic refineries are available.
+Active Survival Kits | How many survival kits are producing.
+Survival Kits | How many survival kits are available.
+Chart Exec Time | (debug) Microsecond timings of how long the script ran for on each invocation.
+Chart Instr Load | (debug) Instruction count complexity load for each invocation of the script.
 
 ### List of chart options
 
 Option | Default | Description
 :---: | :---: | :---
-x | 0 | Panel column to start the chart at. 0 is leftmost column.
-y | 0 | Panel line to start the chart at. 0 is topmost line.
-width | panel width | Number of panel columns to span. 52 is max for 1x1 panel, 104 for 2x1.
-height | panel height | Number of panel lines to span. 35 is max for both 1x1 and 2x1 panels.
+x | 0 | Panel horizontal percentage to start the chart at. 0 is left of the display.
+y | 0 | Panel vertical percentage to start the chart at. 0 is top of the display.
+width | 100 | Percent of the panel width to span.
+height | 100 | Percent of the panel height to span.
 name | no value | If set it will be used for the chart series instead of the section name.
 horizontal | true | If false, the chart will run top to bottom rather than right to left.
 show_title | true | Should the chart title be displayed in the top border?
@@ -122,6 +144,9 @@ show_max | false | Should the max value of the displayed bars be shown?
 show_scale | true | Should the scale (max Y point) be displayed in the bottom border?
 title | chart name | Title to display for the chart.
 unit | varies | Unit to use for display. (Note: Doesn't change chart scaling, just the unit label.)
+bars | 30 | Number of bars to display in the chart. Max is 100.
+warn_above | Not Set | If set, colour bars with value higher than this in red. Bars below will be green.
+warn_below | Not Set | If set, colour bars with value lower than this in red. Bars above will be green.
 
 FIXME: (not currently true) The scale is automatically set by some heuristics that sorta make sense and seem to work for me.
 
@@ -162,7 +187,6 @@ add | "chart title" value | Creates a new datapoint in the series and advances t
 Sticking a list of future plans in a README is a sure-fire way of ensuring they never get done, but nevertheless:
 
 * Spreading the load of writing charts across multiple updates rather than all charts in one batch. Somewhat complicated by the fact that charts can share displays and a refresh for each chart on a display is required when any one is written.
-* Rewriting to use sprites instead of text. The "new" sprites stuff in LCDs looks awesome, and compositing sprites should be a lot faster than piecemeal stringbuilding since it gets rid of stupid loops within loops within loops and pushes the work out to the graphics engine.
 
 ## Contributing:
 

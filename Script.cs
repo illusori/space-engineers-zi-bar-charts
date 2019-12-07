@@ -1,5 +1,5 @@
 ﻿string _script_name = "Zephyr Industries Bar Charts";
-string _script_version = "1.0.1";
+string _script_version = "2.0.0";
 
 string _script_title = null;
 string _script_title_nl = null;
@@ -26,7 +26,7 @@ List<string> _panel_tags = new List<string>(SIZE_PANELS) { "@ChartDebugDisplay",
 /* Genuine global state */
 int _cycles = 0;
 
-List<List<IMyTextPanel>> _panels = new List<List<IMyTextPanel>>(SIZE_PANELS);
+List<List<IMyTextSurfaceProvider>> _panels = new List<List<IMyTextSurfaceProvider>>(SIZE_PANELS);
 List<string> _panel_text = new List<string>(SIZE_PANELS) { "", "", "", "", "" };
 List<IMyProgrammableBlock> _pubsub_blocks = new List<IMyProgrammableBlock>();
 
@@ -45,9 +45,12 @@ public Program() {
     _script_title_nl = $"{_script_name} v{_script_version}\n";
 
     Chart.Program = this;
+    ChartDisplay.Program = this;
+    DrawBuffer.Program = this;
+    SlottedSprite.Program = this;
 
     for (int i = 0; i < SIZE_PANELS; i++) {
-        _panels.Add(new List<IMyTextPanel>());
+        _panels.Add(new List<IMyTextSurfaceProvider>());
     }
 
     // Create load/time charts
@@ -135,7 +138,7 @@ public void Main(string argument, UpdateType updateSource) {
             Log($"Charts: {Chart.Count}, DrawBuffers: {Chart.BufferCount}");
             FlushToPanels(PANELS_DEBUG);
         }
-        //if ((updateSource & (UpdateType.Trigger | UpdateType.Terminal)) != 0) {
+        //if ((updateSource & (UpdateType.Trigger | UpdateType.Terminal | UpdateType.Script)) != 0) {
         if (argument != "") {
             ProcessCommand(argument);
         }
@@ -252,13 +255,16 @@ public void IssueEvent(string event_name, string event_args) {
 public void FindPanels() {
     for (int i = 0; i < SIZE_PANELS; i++) {
         _panels[i].Clear();
-        GridTerminalSystem.GetBlocksOfType<IMyTextPanel>(_panels[i], block => block.CustomName.Contains(_panel_tags[i]));
+        GridTerminalSystem.GetBlocksOfType<IMyTextSurfaceProvider>(_panels[i], block => ((IMyTerminalBlock)block).CustomName.Contains(_panel_tags[i]));
+        if (i == PANELS_CHART)
+            continue;
         for (int j = 0, szj = _panels[i].Count; j < szj; j++) {
-            _panels[i][j].ContentType = ContentType.TEXT_AND_IMAGE;
-            _panels[i][j].Font = "Monospace";
-            _panels[i][j].FontSize = 0.5F;
-            _panels[i][j].TextPadding = 0.5F;
-            _panels[i][j].Alignment = TextAlignment.LEFT;
+            IMyTextPanel panel = _panels[i][j] as IMyTextPanel;
+            panel.ContentType = ContentType.TEXT_AND_IMAGE;
+            panel.Font = "Monospace";
+            panel.FontSize = 0.5F;
+            panel.TextPadding = 0.5F;
+            panel.Alignment = TextAlignment.LEFT;
         }
     }
     Chart.UpdatePanels(_panels[PANELS_CHART]);
@@ -293,17 +299,10 @@ public void FlushToAllPanels() {
     }
 }
 
-/*
-IMyTextSurface textSurface = block.GetSurface(i);
-frame = textSurface.DrawFrame();
-sprite = MySprite.CreateText(string text, string fontId, Color color, float fontSize, TextAlignment textAlignment);
-sprite.Position = new Vector2(textSurface.TextPadding, textSurface.TextPadding);
-frame.Add(sprite);
- */
 public void FlushToPanels(int kind) {
     for (int i = 0, sz = _panels[kind].Count; i < sz; i++) {
         if (_panels[kind][i] != null) {
-            _panels[kind][i].WriteText(_panel_text[kind], false);
+            ((IMyTextPanel)_panels[kind][i]).WriteText(_panel_text[kind], false);
         }
     }
 }
@@ -320,106 +319,127 @@ public void Warning(string s) {
     FlushToPanels(PANELS_WARN);
 }
 
+/*
+IMyTextSurfaceProvider c = blocks[0] as IMyCockpit;
+for (int x = 0; x < c.SurfaceCount; x++)
+IMyTextSurface surface = block.GetSurface(i);
+frame = surface.DrawFrame(); // Does a clear
+
+Text:
+sprite = MySprite.CreateText(string text, string fontId, Color color, float fontSize, TextAlignment textAlignment);
+sprite = MySprite.CreateText("Stuff", "Debug", new Color(1f), 2f, TextAlignment.CENTER);
+sprite.Position = new Vector2(surface.TextPadding, surface.TextPadding);
+frame.Add(sprite);
+
+Sprites:
+
+surface.ContentType = ContentType.SCRIPT;
+MySprite bar = new MySprite(SpriteType.TEXTURE, "SquareSimple", size: new Vector2(50f, 150f), color: new Color(1f));
+bar.Position = surface.TextureSize / 2f - new Vector2(50f, 150f) / 2f;
+frame.Add(bar);
+ */
+/* TODO:
+ *  build list of sprites to draw?
+ *  - knowing which have been queued already is issue?
+ *  - can sprites be resized?
+ *  - reserve slots in queue?
+ *    - overwrite slot when new sprite issued?
+ *    - save/reset eliminated: just static sprites in queue that never get overwritten.
+ */
 public class DrawBuffer {
-    public IMyTextPanel Panel;
-    public int X, Y;
-    public List<StringBuilder> Buffer;
+    static public Program Program { set; get; }
+
+    public IMyTextSurface Surface;
+    private List<MySprite?> Buffer;
     public int ConfigHash;
-    private List<string> template;
-    string blank;
+    public Vector2 Size, Offset;
 
-    public bool IsDirty { get; set; }
+    public bool IsDirty { get; private set; }
 
-    public DrawBuffer(IMyTextPanel panel, int x, int y) {
-        Panel = panel;
-        X = x;
-        Y = y;
-        blank = new String(' ', X) + "\n";
-        Buffer = new List<StringBuilder>(Y);
-        template = new List<string>(Y);
-        for (int i = 0; i < Y; i++) {
-            Buffer.Add(new StringBuilder(blank));
-            template.Add(blank);
-        }
+    // FIXME: attach to surface not panel?
+    public DrawBuffer(IMyTextSurface surface) {
+        surface.ContentType = ContentType.SCRIPT;
+        Offset = (surface.TextureSize - surface.SurfaceSize) / 2f;
+        Size = surface.SurfaceSize * 1f;
+        Buffer = new List<MySprite?>();
+        Surface = surface;
         ConfigHash = 0;
         IsDirty = true;
     }
 
-    public void Save() {
-        for (int i = 0; i < Y; i++) {
-            template[i] = Buffer[i].ToString();
+    // FIXME: explicit layers?
+    // FIXME: slot class with slot index property?
+    public List<int> Reserve(int reserve) {
+        List<int> reserved = new List<int>(reserve);
+        int slot = Buffer.Count();
+
+        // TODO: should allow release of old slots and reuse? order matters though.
+        for (int i = 0; i < reserve; i++) {
+            Buffer.Add(null);
+            reserved.Add(slot + i);
         }
+
+        return reserved;
     }
 
-    public void Reset() {
-        for (int i = 0; i < Y; i++) {
-            Buffer[i].Clear().Append(template[i]);
-        }
-    }
-
-    public void Clear() {
-        for (int i = 0; i < Y; i++) {
-            Buffer[i].Clear().Append(blank);
-        }
-    }
-
-    public void Write(int x, int y, string s) {
-        if (s.Length == 1) {
-            Buffer[y][x] = s[0];
-        } else {
-            Buffer[y].Remove(x, s.Length).Insert(x, s);
-        }
+    public void Write(int slot, MySprite sprite) {
+        //DrawBuffer.Program.Log($"Write {slot}.");
+        Buffer[slot] = sprite;
+        IsDirty = true;
     }
 
     public void Flush() {
-        if (Panel != null) {
-            Panel.WriteText(ToString(), false);
+        if (Surface != null) {
+            using (var frame = Surface.DrawFrame()) {
+                foreach (MySprite? sprite in Buffer) {
+                    if (sprite != null) {
+                        //DrawBuffer.Program.Log($"Frame add p{sprite.Value.Position} s{sprite.Value.Size}.");
+                        frame.Add(sprite.Value);
+                    }
+                }
+            }
         }
         IsDirty = false;
     }
-
-    override public string ToString() {
-        return string.Concat(Buffer);
-    }
 }
 
-public class ViewPort {
+public class Viewport {
     public DrawBuffer Buffer;
-    public int offsetX, offsetY;
-    public int X, Y;
+    public Vector2 Offset = new Vector2(), Size = new Vector2();
 
     public bool IsDirty {
         get { return Buffer.IsDirty; }
-        set { Buffer.IsDirty = value; }
+        //set { Buffer.IsDirty = value; }
     }
 
-    public ViewPort(DrawBuffer buffer, int offset_x, int offset_y, int x, int y) {
+    public Viewport(DrawBuffer buffer, Vector2 offset, Vector2 size) {
         Buffer = buffer;
-        offsetX = offset_x;
-        offsetY = offset_y;
-        X = x;
-        Y = y;
+        Offset = Buffer.Offset + offset;
+        Size = size;
     }
 
-    public void Save() {
-        Buffer.Save();
+    public Viewport SubViewport(Vector2 offset, Vector2 size) {
+        return new Viewport(Buffer, Offset - Buffer.Offset + offset, size);
     }
 
-    public void Reset() {
-        Buffer.Reset();
+    public List<int> Reserve(int reserve) {
+        return Buffer.Reserve(reserve);
     }
 
-    public void Write(int x, int y, string s) {
-        // Yeah, no bounds checking. Sue me.
-        Buffer.Write(offsetX + x, offsetY + y, s);
+    public void Write(int slot, MySprite sprite) {
+        // TODO: Yeah, no bounds checking. Sue me.
+        Buffer.Write(slot, sprite);
     }
 }
 
 public class ChartOptions {
     public bool Horizontal, ShowTitle, ShowCur, ShowAvg, ShowMax, ShowScale;
     public string Title, Unit;
+    public int NumBars;
+    public Color FgColor, BgColor, GoodColor, BadColor;
+    public float WarnAbove, WarnBelow;
 
-    public ChartOptions(bool horizontal = true, bool show_title = true, bool show_cur = true, bool show_avg = true, bool show_max = false, bool show_scale = true, string title = "", string unit = "") {
+    public ChartOptions(bool horizontal = true, bool show_title = true, bool show_cur = true, bool show_avg = true, bool show_max = false, bool show_scale = true, string title = "", string unit = "", int num_bars = 30, float warn_above = Single.NaN, float warn_below = Single.NaN) {
         Horizontal = horizontal;
         ShowTitle = show_title;
         ShowCur = show_cur;
@@ -428,11 +448,71 @@ public class ChartOptions {
         ShowScale = show_scale;
         Title = title;
         Unit = unit;
+        NumBars = num_bars;
+        FgColor = new Color(0.8f);
+        BgColor = new Color(0f);
+        GoodColor = new Color(0f, 0.8f, 0f);
+        BadColor = new Color(0.8f, 0f, 0f);
+        WarnAbove = warn_above;
+        WarnBelow = warn_below;
+    }
+}
+
+public class SlottedSprite {
+    static public Program Program { set; get; }
+
+    public Viewport Viewport { get; private set; }
+    public int Slot { get; private set; }
+
+    public Vector2? Position { get; set; }
+    public Vector2? Size { get; set; }
+    public Color Color { get; set; }
+
+    private MySprite? _sprite;
+    public MySprite? Sprite {
+        get { return _sprite; }
+        set {
+            _sprite = value;
+            if (_sprite != null) {
+                Size = _sprite?.Size;
+                Color = (Color)_sprite?.Color;
+            }
+        }
+    }
+
+    public SlottedSprite(Viewport viewport, MySprite? sprite) {
+        Viewport = viewport;
+        Slot = Viewport.Reserve(1)[0];
+        Sprite = sprite;
+        if (Sprite != null) {
+            Size = Sprite?.Size;
+            Position = Sprite?.Position;
+        } else {
+            Size = new Vector2(0f);
+            Position = new Vector2(0f);
+        }
+        Color = Sprite?.Color ?? new Color(1f);
+    }
+
+    public void Write() {
+        if (Sprite != null) {
+            // TODO: Yeah, no bounds checking. Sue me.
+            // FIXME: is this going to work?
+            MySprite sprite = Sprite.Value;
+            sprite.Position = Viewport.Offset + Position;
+            sprite.Size = Size;
+            sprite.Color = Color;
+            //SlottedSprite.Program.Log($"SlottedSprite.Write p{sprite.Position} s{sprite.Size} O{Viewport.Offset} P{Position}");
+            Viewport.Write(Slot, sprite);
+        }
     }
 }
 
 public class ChartDisplay {
-    public ViewPort Viewport;
+    static public Program Program { set; get; }
+
+    public Viewport FrameViewport;
+    public Viewport ChartViewport;
     public ChartOptions Options;
 
     public int? CurOffset = 0, AvgOffset = 0, MaxOffset = 0, ScaleOffset = 0;
@@ -440,78 +520,231 @@ public class ChartDisplay {
     public double SampleTotal, SampleMax, Scale;
     public int NumSamples;
 
+    private List<SlottedSprite> Bars, Frame;
+
+    const int FRAME_BG            = 0;
+    const int FRAME_BORDER        = 1;
+    const int FRAME_INNER_BG      = 2;
+    const int FRAME_TITLE_BORDER  = 3;
+    const int FRAME_TITLE_BG      = 4;
+    const int FRAME_TITLE         = 5;
+    const int FRAME_STATUS_BORDER = 6;
+    const int FRAME_STATUS_BG     = 7;
+    const int FRAME_STATUS        = 8;
+    const int SIZE_FRAME          = 9;
+
+    //const float FRAME_LABEL_SCALE = 0.8f;
+    //const float FRAME_PADDING = 32f;
+    //const string FRAME_FONT = "Debug";
+
+    const float FRAME_LABEL_SCALE = 0.6f;
+    const float FRAME_PADDING = 24f;
+    const string FRAME_FONT = "Monospace";
+
     public bool IsDirty {
-        get { return Viewport.IsDirty; }
-        set { Viewport.IsDirty = value; }
+        get { return FrameViewport.IsDirty; } // FIXME: needed anymore?
+        //set { Viewport.IsDirty = value; }
     }
 
-    public ChartDisplay(ViewPort viewport, ChartOptions options) {
-        Viewport = viewport;
+    public ChartDisplay(Viewport viewport, ChartOptions options) {
+        FrameViewport = viewport;
+        Vector2 padding = new Vector2(FRAME_PADDING);
+        ChartViewport = FrameViewport.SubViewport(padding + 2f, (FrameViewport.Size - padding * 2f) - 4f);
         Options = options;
 
         ConfigureViewport();
     }
 
     public void ConfigureViewport() {
+        ConfigureFrameViewport();
+        ConfigureChartViewport();
+    }
+
+    public void ConfigureChartViewport() {
+        Bars = new List<SlottedSprite>(Options.NumBars);
+        for (int i = 0; i < Options.NumBars; i++) {
+            // FIXME: configure thickness and time axis position
+            Bars.Add(new SlottedSprite(ChartViewport,
+                new MySprite(SpriteType.TEXTURE, "SquareSimple",
+                    size: new Vector2(50f),
+                    color: Options.FgColor)));
+        }
+    }
+
+
+    public void ConfigureFrameViewport() {
         string label;
-	Viewport.Reset();
-	Viewport.Write(0, 0, "." + new String('-', Viewport.X - 2) + ".");
+        MySprite sprite;
+
+        Frame = new List<SlottedSprite>(SIZE_FRAME);
+        for (int i = 0; i < SIZE_FRAME; i++) {
+            Frame.Add(new SlottedSprite(FrameViewport, null));
+        }
+        // Two square sprites so we get a consistent line thickness, rather than scaling SquareHollow
+        Vector2 outer = new Vector2((float)(((int)FRAME_PADDING / 2) - 1));
+        Vector2 outer_size = FrameViewport.Size - outer * 2f;
+        Vector2 inner = new Vector2((float)(((int)FRAME_PADDING / 2) + 1));
+        Vector2 inner_size = FrameViewport.Size - inner * 2f;
+
+        //ChartDisplay.Program.Warning($"outer:{outer} size:{outer_size}\n    inner:{inner} size:{inner_size}");
+        Frame[FRAME_BG].Sprite = new MySprite(SpriteType.TEXTURE, "SquareSimple",
+            size: FrameViewport.Size,
+            color: new Color(0f, 0.35f, 0.6f));
+        Frame[FRAME_BG].Position = FrameViewport.Size / 2f;
+        //Frame[FRAME_BG].Size = FrameViewport.Size;
+        Frame[FRAME_BORDER].Sprite = new MySprite(SpriteType.TEXTURE, "SquareSimple",
+            size: outer_size,
+            color: Options.FgColor);
+        Frame[FRAME_BORDER].Position = FrameViewport.Size / 2f;
+        //Frame[FRAME_BORDER].Size = outer_size;
+        Frame[FRAME_INNER_BG].Sprite = new MySprite(SpriteType.TEXTURE, "SquareSimple",
+            size: inner_size,
+            color: Options.BgColor);
+        Frame[FRAME_INNER_BG].Position = FrameViewport.Size / 2f;
+        //Frame[FRAME_INNER_BG].Size = inner_size;
+
         if (Options.ShowTitle) {
-            label = $"[{Options.Title}]";
-            if (label.Length < Viewport.X - 2) {
-                Viewport.Write((Viewport.X - label.Length) / 2, 0, label);
+            label = $"{Options.Title}";
+            sprite = MySprite.CreateText(label, FRAME_FONT, Options.FgColor, FRAME_LABEL_SCALE, TextAlignment.CENTER);
+            sprite.Size = FrameViewport.Buffer.Surface.MeasureStringInPixels(new StringBuilder(label), FRAME_FONT, FRAME_LABEL_SCALE);
+            //SlottedSprite.Program.Warning($"  setting size {sprite.Size} ({label})");
+            if (sprite.Size?.X < inner_size.X) {
+                Vector2 border = new Vector2((float)((int)sprite.Size?.X + 11), FRAME_PADDING - 2f);
+                //SlottedSprite.Program.Warning($"  Title size fits");
+                Frame[FRAME_TITLE].Sprite = sprite;
+                Frame[FRAME_TITLE].Position = new Vector2(FrameViewport.Size.X / 2f, (FRAME_PADDING - (float)sprite.Size?.Y) / 2f);
+                Frame[FRAME_TITLE_BG].Sprite = new MySprite(SpriteType.TEXTURE, "SquareSimple",
+                    size: border - 2f,
+                    color: Options.BgColor);
+                Frame[FRAME_TITLE_BG].Position = new Vector2(FrameViewport.Size.X / 2f, FRAME_PADDING / 2f);
+                //Frame[FRAME_TITLE_BG].Size = Frame[FRAME_TITLE_BG].Sprite?.Size;
+                Frame[FRAME_TITLE_BORDER].Sprite = new MySprite(SpriteType.TEXTURE, "SquareSimple",
+                    size: border,
+                    color: Options.FgColor);
+                Frame[FRAME_TITLE_BORDER].Position = new Vector2(FrameViewport.Size.X / 2f, FRAME_PADDING / 2f);
+                //Frame[FRAME_TITLE_BORDER].Size = Frame[FRAME_TITLE_BORDER].Sprite?.Size;
             }
         }
-	for (int i = 1; i < Viewport.Y - 1; i++) {
-            // TODO: might need to blank the betweens for reconfigures
-	    Viewport.Write(0, i, "|");
-	    Viewport.Write(Viewport.X - 1, i, "|");
-	}
-	Viewport.Write(0, Viewport.Y - 1, "." + new String('-', Viewport.X - 2) + ".");
+    }
+
+    public void StartDraw() {
+	SampleCur   = null;
+	SampleTotal = 0.0;
+	SampleMax   = 0.0;
+	Scale       = 0.0;
+	NumSamples  = 1;
+    }
+
+    public void EndDraw() {
+        DrawFrame();
+    }
+
+    public void DrawFrame() {
+        string label;
+
         if (Options.ShowCur || Options.ShowAvg || Options.ShowMax || Options.ShowScale) {
             List<string> segments = new List<string>(2);
-            int offset = 1;
             if (Options.ShowCur) {
-                label = $"cur:     {Options.Unit}";
+                label = $"cur:{SampleCur,5:G4}{Options.Unit}";
                 segments.Add(label);
-                CurOffset = offset + 4;
-                offset += label.Length + 1;
             }
             if (Options.ShowAvg) {
-                label = $"avg:     {Options.Unit}";
+        	float avg = (float)SampleTotal / (float)NumSamples;
+                label = $"avg:{avg,5:G4}{Options.Unit}";
                 segments.Add(label);
-                AvgOffset = offset + 4;
-                offset += label.Length + 1;
             }
             if (Options.ShowMax) {
-                label = $"max:     {Options.Unit}";
+                label = $"max:{SampleMax,5:G4}{Options.Unit}";
                 segments.Add(label);
-                MaxOffset = offset + 4;
-                offset += label.Length + 1;
             }
             if (Options.ShowScale) {
                 string dim = Options.Horizontal ? "Y" : "X";
-                label = $"{dim}:     {Options.Unit}";
+                label = $"{dim}:{Scale,6:G5}{Options.Unit}";
                 segments.Add(label);
-                ScaleOffset = offset + 2;
-                offset += label.Length + 1;
             }
-            label = "[" + string.Join(" ", segments) + "]";
-            if (label.Length < Viewport.X - 2) {
-                offset = (Viewport.X - label.Length) / 2;
-                Viewport.Write(offset, Viewport.Y - 1, label);
-                CurOffset += offset;
-                AvgOffset += offset;
-                MaxOffset += offset;
-                ScaleOffset += offset;
-            } else {
-                CurOffset = null;
-                AvgOffset = null;
-                MaxOffset = null;
-                ScaleOffset = null;
+            label = string.Join(" ", segments);
+            // FIXME: this should be saved only built once in configure
+            Vector2 inner = new Vector2((float)(((int)FRAME_PADDING / 2) + 1));
+            Vector2 inner_size = FrameViewport.Size - inner * 2f;
+            MySprite sprite = MySprite.CreateText(label, FRAME_FONT, Options.FgColor, FRAME_LABEL_SCALE, TextAlignment.CENTER);
+            sprite.Size = FrameViewport.Buffer.Surface.MeasureStringInPixels(new StringBuilder(label), FRAME_FONT, FRAME_LABEL_SCALE);
+            //SlottedSprite.Program.Warning($"  setting status size {sprite.Size} ({label})");
+            if (sprite.Size?.X < inner_size.X) {
+                Vector2 border = new Vector2((float)((int)sprite.Size?.X + 11), FRAME_PADDING - 2f);
+                Frame[FRAME_STATUS].Sprite = sprite;
+                Frame[FRAME_STATUS].Position = new Vector2(FrameViewport.Size.X / 2f, FrameViewport.Size.Y - FRAME_PADDING + (FRAME_PADDING - (float)sprite.Size?.Y) / 2f);
+                Frame[FRAME_STATUS_BG].Sprite = new MySprite(SpriteType.TEXTURE, "SquareSimple",
+                    size: border - 2f,
+                    color: Options.BgColor);
+                Frame[FRAME_STATUS_BG].Position = new Vector2(FrameViewport.Size.X / 2f, FrameViewport.Size.Y - FRAME_PADDING / 2f);
+                //Frame[FRAME_STATUS_BG].Size = Frame[FRAME_STATUS_BG].Sprite?.Size;
+                Frame[FRAME_STATUS_BORDER].Sprite = new MySprite(SpriteType.TEXTURE, "SquareSimple",
+                    size: border,
+                    color: Options.FgColor);
+                Frame[FRAME_STATUS_BORDER].Position = new Vector2(FrameViewport.Size.X / 2f, FrameViewport.Size.Y - FRAME_PADDING / 2f);
+                //Frame[FRAME_STATUS_BORDER].Size = Frame[FRAME_STATUS_BORDER].Sprite?.Size;
             }
         }
-	Viewport.Save();
+
+        // FIXME: frame needs drawing before bars, status after bars to get values.
+        // FIXME: can be finagled by order of reservations.
+        for (int i = 0; i < SIZE_FRAME; i++) {
+            //ChartDisplay.Program.Log($"Writing frame {i}");
+            Frame[i].Write();
+        }
+    }
+
+    public void DrawBars() {
+        // FIXME: move in here and access dataset ourselves.
+    }
+
+    public void DrawBar(int t, double val, double max) {
+        //ChartDisplay.Program.Log($"DrawBarToVP top");
+
+        int slot = Bars.Count - t - 1;
+
+        if (slot < 0)
+            return;
+
+        // FIXME: Hmm, this is awkward if we aren't redrawing all bars.
+        if (!SampleCur.HasValue)
+            SampleCur = val;
+        SampleTotal += val;
+        if (val > SampleMax)
+            SampleMax = val;
+        Scale = max;
+        NumSamples++;
+
+        SlottedSprite slotted_sprite = Bars[slot];
+
+        Vector2 breadth_mask, length_mask;
+
+        if (Options.Horizontal) {
+            breadth_mask = new Vector2(1f, 0f);
+            length_mask = new Vector2(0f, 1f);
+        } else {
+            breadth_mask = new Vector2(0f, 1f);
+            length_mask = new Vector2(1f, 0f);
+        }
+        if (Single.IsNaN(Options.WarnAbove) && Single.IsNaN(Options.WarnBelow)) {
+            slotted_sprite.Color = Options.FgColor;
+        } else {
+	    if (!Single.IsNaN(Options.WarnAbove) && (val > (double)Options.WarnAbove)) {
+                slotted_sprite.Color = Options.BadColor;
+            } else if (!Single.IsNaN(Options.WarnBelow) && (val < (double)Options.WarnBelow)) {
+                slotted_sprite.Color = Options.BadColor;
+            } else {
+                slotted_sprite.Color = Options.GoodColor;
+	    }
+        }
+
+        //ChartDisplay.Program.Log($"DrawBarToVP t{t}, v{val}, m{max}");
+        slotted_sprite.Size = (length_mask * ChartViewport.Size * (float)val / (float)max) +
+            (breadth_mask * ((ChartViewport.Size / (float)Bars.Count) - 2f));
+        slotted_sprite.Position = (breadth_mask * ((float)slot + 0.5f) * ChartViewport.Size / (float)Bars.Count) +
+            (length_mask * new Vector2(-1f, 1f) * (new Vector2(0f, 1f) * ChartViewport.Size - slotted_sprite.Size / 2f));
+        //ChartDisplay.Program.Log($"DrawBarToVP t{t}, v{val}, m{max}\n    s{slotted_sprite.Size} p{slotted_sprite.Position}");
+        slotted_sprite.Write();
     }
 }
 
@@ -547,7 +780,7 @@ public class Chart {
     public bool IsDataDirty { get { return dataset.IsDirty; } }
     public bool IsDisplayDirty {
         get { return displays.Any(display => display.IsDirty); }
-        set { foreach (ChartDisplay display in displays) display.IsDirty = value; }
+        //set { foreach (ChartDisplay display in displays) display.IsDirty = value; }
     }
 
     /* Reused single-run state objects, only global to avoid realloc/gc-thrashing */
@@ -569,7 +802,7 @@ public class Chart {
         if (chart.Unit != unit) {
             // FIXME: make this default_unit and add default_title
             chart.Unit = unit;
-            chart.ConfigureViewPorts();
+            chart.ConfigureViewports();
         }
         return chart;
     }
@@ -590,16 +823,16 @@ public class Chart {
         return dataset.Datapoint(offset);
     }
 
-    public void AddViewPort(ViewPort viewport, ChartOptions options) {
+    public void AddViewport(Viewport viewport, ChartOptions options) {
         ChartDisplay display = new ChartDisplay(viewport, options);
 
         displays.Add(display);
     }
-    public void AddBuffer(DrawBuffer buffer, int offset_x, int offset_y, int x, int y, ChartOptions options) {
-        AddViewPort(new ViewPort(buffer, offset_x, offset_y, x, y), options);
+    public void AddBuffer(DrawBuffer buffer, Vector2 offset, Vector2 size, ChartOptions options) {
+        AddViewport(new Viewport(buffer, offset, size), options);
     }
 
-    public void ConfigureViewPorts() {
+    public void ConfigureViewports() {
         for (int d = 0, sz = displays.Count; d < sz; d++) {
             displays[d].Options.Title = Title; // Ew. Codesmell.
             displays[d].Options.Unit = Unit;
@@ -607,8 +840,9 @@ public class Chart {
         }
     }
 
-    public void AddBuffer(DrawBuffer buffer, int offset_x, int offset_y, int x, int y) {
-        AddViewPort(new ViewPort(buffer, offset_x, offset_y, x, y), new ChartOptions());
+    // FIXME: still needed?
+    public void AddBuffer(DrawBuffer buffer, Vector2 offset, Vector2 size) {
+        AddViewport(new Viewport(buffer, offset, size), new ChartOptions());
     }
 
     public void RemoveDisplays() {
@@ -616,105 +850,24 @@ public class Chart {
     }
 
     public void RemoveDisplaysForBuffer(DrawBuffer buffer) {
-        displays.RemoveAll(display => display.Viewport.Buffer == buffer);
-    }
-
-    private void DrawBarToDisplay(int d, int t, double val, double max) {
-        ChartDisplay display = displays[d];
-        ViewPort viewport = display.Viewport;
-        ChartOptions options = display.Options;
-	int x, y, size, dx, dy;
-	List<string> blocks;
-
-        if (options.Horizontal) {
-	    x = viewport.X - 2 - t;
-            if (x < 1)
-                return;
-            y = viewport.Y - 2;
-	    size = viewport.Y - 2;
-	    blocks = _y_blocks;
-	    dx = 0;
-            dy = -1;
-        } else {
-	    x = 1;
-            y = viewport.Y - 2 - t;
-            if (y < 1)
-                return;
-	    size = viewport.X - 2;
-	    blocks = _x_blocks;
-	    dx = 1;
-            dy = 0;
-        }
-
-        if (!display.SampleCur.HasValue)
-            display.SampleCur = val;
-        display.SampleTotal += val;
-        if (val > display.SampleMax)
-            display.SampleMax = val;
-        display.Scale = max;
-        display.NumSamples++;
-
-        //parent.Log($"DrawBarToVP t{t}, v{val}, m{max}\nx{x}, y{y}, s{size}, dx{dx}, dy{dy}");
-
-	double scaled = val * size / max;
-	int repeat = (int)scaled;
-	int fraction = (int)((scaled * 8.0) % (double)size);
-
-	fraction = fraction >= 4 ? 4 : 0; // Only half block is implemented in font.
-
-        // FIXME: unroll x/y versions and i < repeat and i == repeat cases.
-	for (int i = 0; i < size; i++) {
-	    if (i < repeat) {
-                viewport.Buffer.Buffer[viewport.offsetY + y][viewport.offsetX + x] = blocks[8][0];
-		//viewport.Write(x, y, blocks[8]); // TODO: unroll buffer write?
-	    } else if (i == repeat) {
-                viewport.Buffer.Buffer[viewport.offsetY + y][viewport.offsetX + x] = blocks[fraction][0];
-		//viewport.Write(x, y, blocks[fraction]); // TODO: unroll buffer write?
-		break;
-	    }
-	    x += dx;
-	    y += dy;
-	}
+        displays.RemoveAll(display => display.FrameViewport.Buffer == buffer);
     }
 
     public void DrawBar(int t, double val, double max) {
         for (int d = 0, sz = displays.Count; d < sz; d++) {
-            DrawBarToDisplay(d, t, val, max);
+            displays[d].DrawBar(t, val, max);
         }
     }
 
     public void StartDraw() {
         for (int d = 0, sz = displays.Count; d < sz; d++) {
-            displays[d].SampleCur   = null;
-            displays[d].SampleTotal = 0.0;
-            displays[d].SampleMax   = 0.0;
-            displays[d].Scale       = 0.0;
-            displays[d].NumSamples  = 1;
+            displays[d].StartDraw();
         }
     }
 
     public void EndDraw() {
-        float avg;
-        ChartDisplay display;
-        ViewPort viewport;
-        ChartOptions options;
         for (int d = 0, sz = displays.Count; d < sz; d++) {
-            display = displays[d];
-            viewport = display.Viewport;
-            options = display.Options;
-            avg = (float)display.SampleTotal / (float)display.NumSamples;
-            if (options.ShowCur && display.CurOffset.HasValue && display.SampleCur.HasValue) {
-                viewport.Write((int)display.CurOffset, viewport.Y - 1, $"{display.SampleCur,5:G4}");
-            }
-            if (options.ShowAvg && display.AvgOffset.HasValue) {
-                viewport.Write((int)display.AvgOffset, viewport.Y - 1, $"{avg,5:G4}");
-            }
-            if (options.ShowMax && display.MaxOffset.HasValue) {
-                viewport.Write((int)display.MaxOffset, viewport.Y - 1, $"{display.SampleMax,5:G4}");
-            }
-            if (options.ShowScale && display.ScaleOffset.HasValue) {
-                viewport.Write((int)display.ScaleOffset, viewport.Y - 1, $"{display.Scale,5:G4}");
-            }
+            displays[d].EndDraw();
         }
     }
 
@@ -733,7 +886,7 @@ public class Chart {
     }
 
     static public void SimpleDrawCharts() {
-        ResetChartBuffers();
+        //ResetChartBuffers();
         // FIXME: Ideally should spread this over different updates. Messes with composition though.
         foreach (Chart chart in _charts.Values) {
             chart.DrawChart();
@@ -744,10 +897,10 @@ public class Chart {
     static public void MinimalDrawCharts() {
         foreach (Chart chart in _charts.Values) {
             if (chart.IsDataDirty) {
-                chart.IsDisplayDirty = true;
+                // FIXME: chart.IsDisplayDirty = true;
             }
         }
-        ResetDirtyChartBuffers();
+        //ResetDirtyChartBuffers();
         // FIXME: Ideally should spread this over different updates. Messes with composition though.
         foreach (Chart chart in _charts.Values) {
             if (chart.IsDisplayDirty) {
@@ -761,11 +914,13 @@ public class Chart {
         SimpleDrawCharts();
     }
 
+    /* FIXME needed?
     static public void ResetChartBuffers() {
 	foreach (DrawBuffer buffer in _chart_buffers.Values) {
 	    buffer.Reset();
 	}
     }
+     */
 
     static public void FlushChartBuffers() {
 	foreach (DrawBuffer buffer in _chart_buffers.Values) {
@@ -773,6 +928,7 @@ public class Chart {
 	}
     }
 
+    /* FIXME needed?
     static public void ResetDirtyChartBuffers() {
 	foreach (DrawBuffer buffer in _chart_buffers.Values) {
             if (buffer.IsDirty) {
@@ -780,6 +936,7 @@ public class Chart {
             }
 	}
     }
+     */
 
     static public void FlushDirtyChartBuffers() {
 	foreach (DrawBuffer buffer in _chart_buffers.Values) {
@@ -789,7 +946,7 @@ public class Chart {
 	}
     }
 
-    static public void UpdatePanels(List<IMyTextPanel> panels) {
+    static public void UpdatePanels(List<IMyTextSurfaceProvider> panels) {
 	// Special logic for ChartPanels, need to set up buffers and read their config.
 	HashSet<long> found_ids = new HashSet<long>(panels.Count);
 	DrawBuffer buffer;
@@ -797,27 +954,38 @@ public class Chart {
 	MyIniParseResult parse_result;
 	List<string> sections = new List<string>();
 	Chart chart;
-	int width, height, x, y;
+	int width, height, x, y, num_bars;
 	bool horizontal, show_title, show_cur, show_avg, show_max, show_scale;
+        float warn_above, warn_below;
 	string name, title, unit;
 	for (int i = 0, sz = panels.Count; i < sz; i++) {
-	    IMyTextPanel panel = panels[i];
+	    IMyTerminalBlock panel = (IMyTerminalBlock)panels[i];
 	    long id = panel.EntityId;
 	    found_ids.Add(id);
+            //ChartDisplay.Program.Warning($"Configuring: \"{panel.CustomName}\"");
 	    if (!_chart_buffers.TryGetValue(id, out buffer)) {
-		// 42x28 seems about right for 1x1 panel at 0.6
-		// 52x35 for 1x1 panel at 0.5 with 0.5% padding.
-		// 1x1 panel is 512 wide, 2x1 presumeably 1024 wide.
-		float scale = panel.SurfaceSize.X / 512F;
-		buffer = new DrawBuffer(panel, (int)(52F * scale), 35);
+                // FIXME: multiple surface handling.
+		buffer = new DrawBuffer(((IMyTextSurfaceProvider)panel).GetSurface(0));
+                //ChartDisplay.Program.Warning($"New panel: \"{panel.Name}\"");
+                //ChartDisplay.Program.Warning($"  panel: \"{panel.DefinitionDisplayNameText}\"");
+                // FIXME: this may be localized???
+                if (panel.DefinitionDisplayNameText.Contains("Corner LCD")) {
+                    // Correct corner LCD surface sizes
+                    if (panel.DefinitionDisplayNameText.Contains("Corner LCD Flat")) {
+                        buffer.Size.Y = 88f;
+                    } else {
+                        buffer.Size.Y = 76f;
+                    }
+                    //ChartDisplay.Program.Warning($"fixing panel: \"{panel.CustomName}\", s{buffer.Size}");
+                }
 		_chart_buffers.Add(id, buffer);
 	    } else {
 		if (panel.CustomData.GetHashCode() == buffer.ConfigHash) {
 		    //Program.Warning($"Chart panel skipping unchanged config parse on panel '{panel.CustomName}'");
 		    continue;
 		}
-		buffer.Clear();
-		buffer.Save();
+		//buffer.Clear();
+		//buffer.Save();
 	    }
 	    buffer.ConfigHash = panel.CustomData.GetHashCode();
 	    if (!_ini.TryParse(panel.CustomData, out parse_result)) {
@@ -836,8 +1004,8 @@ public class Chart {
 		    continue;
 		}
                 */
-		width = _ini.Get(section, "width").ToInt32(buffer.X);
-		height = _ini.Get(section, "height").ToInt32(buffer.Y);
+		width = _ini.Get(section, "width").ToInt32(100);
+		height = _ini.Get(section, "height").ToInt32(100);
 		x = _ini.Get(section, "x").ToInt32(0);
 		y = _ini.Get(section, "y").ToInt32(0);
 		// horizontal, etc ChartOptions settings.
@@ -849,11 +1017,30 @@ public class Chart {
 		show_scale = _ini.Get(section, "show_scale").ToBoolean(true);
                 title = _ini.Get(section, "title").ToString(name);
                 unit = _ini.Get(section, "unit").ToString(chart.Unit); // FIXME: prob gets overwritten by create commands
+		num_bars = _ini.Get(section, "bars").ToInt32(30);
+		warn_above = _ini.Get(section, "warn_above").ToSingle(Single.NaN);
+		warn_below = _ini.Get(section, "warn_below").ToSingle(Single.NaN);
 
 		// Hmm, removing it here means we can't have multiples of same chart on same panel
 		// TODO: maybe keep track of those chart names we've removed already in the sections loop?
 		chart.RemoveDisplaysForBuffer(buffer);
-		chart.AddBuffer(buffer, x, y, width, height, new ChartOptions(horizontal, show_title, show_cur, show_avg, show_max, show_scale, title, unit));
+                // FIXME: clamp width/height, x/y
+		chart.AddBuffer(buffer,
+                    buffer.Size * new Vector2((float)x, (float)y) / 100f,
+                    buffer.Size * new Vector2((float)width, (float)height) / 100f,
+                    new ChartOptions(
+                        horizontal: horizontal,
+                        show_title: show_title,
+                        show_cur: show_cur,
+                        show_avg: show_avg,
+                        show_max: show_max,
+                        show_scale: show_scale,
+                        title: title,
+                        unit: unit,
+                        num_bars: num_bars,
+                        warn_above: warn_above,
+                        warn_below: warn_below
+                        ));
 	    }
 	}
 	// Prune old ids in _chart_buffers
@@ -889,12 +1076,11 @@ class Dataset {
         IsDirty = true;
     }
 
-    private int SafeMod(int val, int mod) {
+    public int SafeMod(int val, int mod) {
 	while (val < 0)
 	    val += mod;
 	return val % mod;
     }
-
     private int Offset(int delta) { return SafeMod(Count + delta, HISTORY); }
 
     public double Datapoint(int offset) {
