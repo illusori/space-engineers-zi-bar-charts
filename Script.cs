@@ -38,7 +38,7 @@ int _last_run_datapoints = 0;
 
 /* Reused single-run state objects, only global to avoid realloc/gc-thrashing */
 // FIXME: _chart here? _panel?
-List<string> _arguments = new List<string>();
+MyCommandLine _command_line = new MyCommandLine();
 
 public Program() {
     _script_title = $"{_script_name} v{_script_version}";
@@ -135,7 +135,7 @@ public void Main(string argument, UpdateType updateSource) {
                 long count_datapoints = (long)Chart.Find(CHART_DATAPOINTS).Datapoint(-i);
                 Log($"  [T-{i,-2}] Load {load}% in {time}us (Rx: {time_subs}us/{count_datapoints} points)");
             }
-            Log($"Charts: {Chart.Count}, DrawBuffers: {Chart.BufferCount}");
+            Log($"Charts: {Chart.InstanceCount}, DrawBuffers: {Chart.BufferCount}");
             FlushToPanels(PANELS_DEBUG);
         }
         //if ((updateSource & (UpdateType.Trigger | UpdateType.Terminal | UpdateType.Script)) != 0) {
@@ -151,84 +151,44 @@ public void Main(string argument, UpdateType updateSource) {
     }
 }
 
-// Super basic and noddy.
-public List<string> ParseQuotedArguments(string argument) {
-    List<string> words = new List<string>(argument.Split(' '));
-    List<string> arguments = new List<string>();
-    int? open = null;
-    string word;
-
-    if (!argument.Contains("\"")) {
-        return words;
+public void ProcessCommand(string argument) {
+    if (_command_line.TryParse(argument)) {
+	string command = _command_line.Argument(0);
+	if (command == null) {
+	    Log("No command specified");
+	} else if (command == "event") {
+	    ProcessEvent();
+	} else if (command == "add") {
+	    // add "chart name" value
+	    if (_command_line.ArgumentCount != 3) {
+		Warning("Syntax: add \"<chart name>\" <double value>");
+	    } else {
+		Chart.Find(_command_line.Argument(1)).AddDatapoint(double.Parse(_command_line.Argument(2), System.Globalization.CultureInfo.InvariantCulture));
+		_last_run_datapoints++;
+	    }
+	} else if (command == "create") {
+	    // create "chart name" "units"
+	    if (_command_line.ArgumentCount != 3) {
+		Warning("Syntax: create \"<chart name>\" \"<units>\"");
+	    } else {
+		Chart.Create(_command_line.Argument(1), _command_line.Argument(2));
+	    }
+	} else {
+	    Log($"Unknown command {command}");
+	}
     }
-
-    for (int i = 0; i < words.Count; i++) {
-        //Warning($"{i} Parsing word '{words[i]}'");
-        if (open == null) {
-            //Warning($"Outside quotes");
-            if (words[i][0] == '"') {
-                //Warning($"Starts with quote");
-                if (words[i][words[i].Length - 1] != '"') {
-                    open = i;
-                    continue;
-                }
-                //Warning($"...Also ends with quote");
-                arguments.Add(words[i].Substring(1, words[i].Length - 2));
-            } else {
-                //Warning($"Adding word");
-                arguments.Add(words[i]);
-            }
-        } else {
-            //Warning($"Inside quotes from {open}");
-            if (words[i][words[i].Length - 1] == '"') {
-                //Warning($"Ends with quote");
-                word = String.Join(" ", words.GetRange((int)open, i - (int)open + 1).ToArray());
-                word = word.Substring(1, word.Length - 2);
-                //Warning($"  word is {word}");
-                arguments.Add(word);
-                open = null;
-            }
-        }
-    }
-    return arguments;
 }
 
-public void ProcessCommand(string argument) {
-    //Log($"Running command '{argument}'.");
-    _arguments = ParseQuotedArguments(argument);
-    //foreach (string word in _arguments) {
-    //    Warning($"Parsed out word '{word}'.");
-    //}
-    // TODO: should require source script name as argument?
-    if (_arguments.Count == 0) {
-	Warning($"Couldn't parse arguments in '{argument}'.");
-        return;
-    }
-    if (_arguments[0] == "event") {
-        // FIXME: validation
-	if (_arguments[2] == "datapoint.issue") {
-	    Chart.Find(_arguments[3]).AddDatapoint(double.Parse(_arguments[4], System.Globalization.CultureInfo.InvariantCulture));
-	    _last_run_datapoints++;
-	} else if (_arguments[2] == "dataset.create") {
-	    Chart.Create(_arguments[3], _arguments[4]);
-	}
-    } else if (_arguments[0] == "add") {
-	// add "chart name" value
-	if (_arguments.Count != 3) {
-	    Warning("Syntax: add \"<chart name>\" <double value>");
-	} else {
-	    Chart.Find(_arguments[1]).AddDatapoint(double.Parse(_arguments[2], System.Globalization.CultureInfo.InvariantCulture));
-	    _last_run_datapoints++;
-	}
-    } else if (_arguments[0] == "create") {
-	// create "chart name" "units"
-	if (_arguments.Count != 3) {
-	    Warning("Syntax: create \"<chart name>\" \"<units>\"");
-	} else {
-	    Chart.Create(_arguments[1], _arguments[2]);
-	}
-    } else {
-	Warning($"Unknown command '{_arguments[0]}'.");
+
+public void ProcessEvent() {
+    string source     = _command_line.Argument(1);
+    string event_name = _command_line.Argument(2);
+    // FIXME: validation
+    if (event_name == "datapoint.issue") {
+	Chart.Find(_command_line.Argument(3)).AddDatapoint(double.Parse(_command_line.Argument(4), System.Globalization.CultureInfo.InvariantCulture));
+	_last_run_datapoints++;
+    } else if (event_name == "dataset.create") {
+	Chart.Create(_command_line.Argument(3), _command_line.Argument(4));
     }
 }
 
@@ -239,6 +199,7 @@ public double TimeAsUsec(double t) {
 
 public void FindPubSubBlocks() {
     _pubsub_blocks.Clear();
+    // FIXME: probably want to check block.IsSameConstructAs(Me)
     GridTerminalSystem.GetBlocksOfType<IMyProgrammableBlock>(_pubsub_blocks, block => block.CustomName.Contains(PUBSUB_SCRIPT_NAME));
     IssueEvent("pubsub.register", $"datapoint.issue {Me.EntityId}");
     IssueEvent("pubsub.register", $"dataset.create {Me.EntityId}");
@@ -319,33 +280,6 @@ public void Warning(string s) {
     FlushToPanels(PANELS_WARN);
 }
 
-/*
-IMyTextSurfaceProvider c = blocks[0] as IMyCockpit;
-for (int x = 0; x < c.SurfaceCount; x++)
-IMyTextSurface surface = block.GetSurface(i);
-frame = surface.DrawFrame(); // Does a clear
-
-Text:
-sprite = MySprite.CreateText(string text, string fontId, Color color, float fontSize, TextAlignment textAlignment);
-sprite = MySprite.CreateText("Stuff", "Debug", new Color(1f), 2f, TextAlignment.CENTER);
-sprite.Position = new Vector2(surface.TextPadding, surface.TextPadding);
-frame.Add(sprite);
-
-Sprites:
-
-surface.ContentType = ContentType.SCRIPT;
-MySprite bar = new MySprite(SpriteType.TEXTURE, "SquareSimple", size: new Vector2(50f, 150f), color: new Color(1f));
-bar.Position = surface.TextureSize / 2f - new Vector2(50f, 150f) / 2f;
-frame.Add(bar);
- */
-/* TODO:
- *  build list of sprites to draw?
- *  - knowing which have been queued already is issue?
- *  - can sprites be resized?
- *  - reserve slots in queue?
- *    - overwrite slot when new sprite issued?
- *    - save/reset eliminated: just static sprites in queue that never get overwritten.
- */
 public class DrawBuffer {
     static public Program Program { set; get; }
 
@@ -356,7 +290,6 @@ public class DrawBuffer {
 
     public bool IsDirty { get; private set; }
 
-    // FIXME: attach to surface not panel?
     public DrawBuffer(IMyTextSurface surface) {
         surface.ContentType = ContentType.SCRIPT;
         Offset = (surface.TextureSize - surface.SurfaceSize) / 2f;
@@ -483,21 +416,15 @@ public class SlottedSprite {
     public SlottedSprite(Viewport viewport, MySprite? sprite) {
         Viewport = viewport;
         Slot = Viewport.Reserve(1)[0];
-        Sprite = sprite;
-        if (Sprite != null) {
-            Size = Sprite?.Size;
-            Position = Sprite?.Position;
-        } else {
-            Size = new Vector2(0f);
-            Position = new Vector2(0f);
-        }
-        Color = Sprite?.Color ?? new Color(1f);
+        Sprite   = sprite;
+        Size     = Sprite?.Size     ?? new Vector2(0f);
+        Position = Sprite?.Position ?? new Vector2(0f);
+        Color    = Sprite?.Color    ?? new Color(1f);
     }
 
     public void Write() {
         if (Sprite != null) {
             // TODO: Yeah, no bounds checking. Sue me.
-            // FIXME: is this going to work?
             MySprite sprite = Sprite.Value;
             sprite.Position = Viewport.Offset + Position;
             sprite.Size = Size;
@@ -508,6 +435,7 @@ public class SlottedSprite {
     }
 }
 
+// TODO: move frame stuff into an interface and share with a TextDisplay.
 public class ChartDisplay {
     static public Program Program { set; get; }
 
@@ -533,6 +461,7 @@ public class ChartDisplay {
     const int FRAME_STATUS        = 8;
     const int SIZE_FRAME          = 9;
 
+    // Alternatives if you don't like Monospace.
     //const float FRAME_LABEL_SCALE = 0.8f;
     //const float FRAME_PADDING = 32f;
     //const string FRAME_FONT = "Debug";
@@ -559,18 +488,6 @@ public class ChartDisplay {
         ConfigureFrameViewport();
         ConfigureChartViewport();
     }
-
-    public void ConfigureChartViewport() {
-        Bars = new List<SlottedSprite>(Options.NumBars);
-        for (int i = 0; i < Options.NumBars; i++) {
-            // FIXME: configure thickness and time axis position
-            Bars.Add(new SlottedSprite(ChartViewport,
-                new MySprite(SpriteType.TEXTURE, "SquareSimple",
-                    size: new Vector2(50f),
-                    color: Options.FgColor)));
-        }
-    }
-
 
     public void ConfigureFrameViewport() {
         string label;
@@ -624,6 +541,17 @@ public class ChartDisplay {
                 Frame[FRAME_TITLE_BORDER].Position = new Vector2(FrameViewport.Size.X / 2f, FRAME_PADDING / 2f);
                 //Frame[FRAME_TITLE_BORDER].Size = Frame[FRAME_TITLE_BORDER].Sprite?.Size;
             }
+        }
+    }
+
+    public void ConfigureChartViewport() {
+        Bars = new List<SlottedSprite>(Options.NumBars);
+        for (int i = 0; i < Options.NumBars; i++) {
+            // FIXME: configure thickness and time axis position
+            Bars.Add(new SlottedSprite(ChartViewport,
+                new MySprite(SpriteType.TEXTURE, "SquareSimple",
+                    size: new Vector2(50f),
+                    color: Options.FgColor)));
         }
     }
 
@@ -686,8 +614,6 @@ public class ChartDisplay {
             }
         }
 
-        // FIXME: frame needs drawing before bars, status after bars to get values.
-        // FIXME: can be finagled by order of reservations.
         for (int i = 0; i < SIZE_FRAME; i++) {
             //ChartDisplay.Program.Log($"Writing frame {i}");
             Frame[i].Write();
@@ -698,6 +624,7 @@ public class ChartDisplay {
         // FIXME: move in here and access dataset ourselves.
     }
 
+    // TODO: could use circular buffer and only update position, not size.
     public void DrawBar(int t, double val, double max) {
         //ChartDisplay.Program.Log($"DrawBarToVP top");
 
@@ -717,15 +644,6 @@ public class ChartDisplay {
 
         SlottedSprite slotted_sprite = Bars[slot];
 
-        Vector2 breadth_mask, length_mask;
-
-        if (Options.Horizontal) {
-            breadth_mask = new Vector2(1f, 0f);
-            length_mask = new Vector2(0f, 1f);
-        } else {
-            breadth_mask = new Vector2(0f, 1f);
-            length_mask = new Vector2(1f, 0f);
-        }
         if (Single.IsNaN(Options.WarnAbove) && Single.IsNaN(Options.WarnBelow)) {
             slotted_sprite.Color = Options.FgColor;
         } else {
@@ -738,9 +656,23 @@ public class ChartDisplay {
 	    }
         }
 
+        Vector2 breadth_mask, length_mask;
+
+        // FIXME: constantize and unroll the static vectors.
+
+        // Funky vector crud to ensure we act on the correct dimension of the vectors.
+        if (Options.Horizontal) {
+            breadth_mask = new Vector2(1f, 0f);
+            length_mask = new Vector2(0f, 1f);
+        } else {
+            breadth_mask = new Vector2(0f, 1f);
+            length_mask = new Vector2(1f, 0f);
+        }
+
         //ChartDisplay.Program.Log($"DrawBarToVP t{t}, v{val}, m{max}");
         slotted_sprite.Size = (length_mask * ChartViewport.Size * (float)val / (float)max) +
             (breadth_mask * ((ChartViewport.Size / (float)Bars.Count) - 2f));
+        // X/Y axis go in opposite directions and start from opposite ends, hence the length madness
         slotted_sprite.Position = (breadth_mask * ((float)slot + 0.5f) * ChartViewport.Size / (float)Bars.Count) +
             (length_mask * new Vector2(-1f, 1f) * (new Vector2(0f, 1f) * ChartViewport.Size - slotted_sprite.Size / 2f));
         //ChartDisplay.Program.Log($"DrawBarToVP t{t}, v{val}, m{max}\n    s{slotted_sprite.Size} p{slotted_sprite.Position}");
@@ -749,18 +681,11 @@ public class ChartDisplay {
 }
 
 public class Chart {
-    static private List<string> _y_blocks = new List<string>(8) {
-      " ", "\u2581", "\u2582", "\u2583", "\u2584", "\u2585", "\u2586", "\u2587", "\u2588",
-    };
-    static private List<string> _x_blocks = new List<string>(8) {
-      " ", "\u258F", "\u258E", "\u258D", "\u258C", "\u258B", "\u258A", "\u2589", "\u2588",
-    };
-
     static public Program Program { set; get; }
 
     // title => Chart
     static private Dictionary<string, Chart> _charts = new Dictionary<string, Chart>();
-    static public int Count { get { return _charts.Count(); } }
+    static public int InstanceCount { get { return _charts.Count(); } }
 
     // panel.EntityId => DrawBuffer
     static private Dictionary<long, DrawBuffer> _chart_buffers = new Dictionary<long, DrawBuffer>();
@@ -776,7 +701,7 @@ public class Chart {
     public double Max { get { return dataset.Max; } }
     public double Sum { get { return dataset.Sum; } }
     public double Avg { get { return dataset.Avg; } }
-    public int Length { get { return dataset.Length; } }
+    public int Count { get { return dataset.Count; } }
     public bool IsDataDirty { get { return dataset.IsDirty; } }
     public bool IsDisplayDirty {
         get { return displays.Any(display => display.IsDirty); }
@@ -1061,14 +986,14 @@ class Dataset {
     private List<double> datapoints = new List<double>(HISTORY);
 
     public bool IsDirty { get; private set; }
-    public int Count { get; private set; }
+    public int Counter { get; private set; }
+    public int Count { get { return datapoints.Count(); } }
     public double Max { get { return datapoints.Max(); } }
-    public double Sum { get { return datapoints.Sum(); } }
-    public double Avg { get { return datapoints.Average(); } }
-    public int Length { get { return datapoints.Count(); } }
+    public double Sum { get; private set; }
+    public double Avg { get { return Sum / Count; } }
 
     public Dataset() {
-        Count = 0;
+        Counter = 0;
         //datapoints = new List<double>(HISTORY);
         for (int i = 0; i < HISTORY; i++) {
             datapoints.Add(0.0);
@@ -1081,15 +1006,17 @@ class Dataset {
 	    val += mod;
 	return val % mod;
     }
-    private int Offset(int delta) { return SafeMod(Count + delta, HISTORY); }
+    private int Offset(int delta) { return SafeMod(Counter + delta, HISTORY); }
 
     public double Datapoint(int offset) {
         return datapoints[Offset(offset)];
     }
 
     public void AddDatapoint(double datapoint) {
-        Count++;
-        datapoints[Offset(0)] = datapoint;
+        Counter++;
+        int now = Offset(0);
+        Sum += datapoint - datapoints[now];
+        datapoints[now] = datapoint;
         IsDirty = true;
     }
 
