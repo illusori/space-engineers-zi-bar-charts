@@ -875,12 +875,12 @@ public class Chart {
 
         if (long.TryParse(hex, System.Globalization.NumberStyles.HexNumber, null, out rgb)) {
             col = new Color(
-                (float)((rgb % (256 * 256 * 256)) / (256 * 256)) / 256f,
-                (float)((rgb % (256 * 256)) / 256) / 256f,
-                (float)(rgb % 256) / 256f
+                (float)((rgb % (256 * 256 * 256)) / (256 * 256)) / 255f,
+                (float)((rgb % (256 * 256)) / 256) / 255f,
+                (float)(rgb % 256) / 255f
                 );
         } else {
-            // FIXME: warn.
+            ChartDisplay.Program.Warning($"Unable to parse colour from hex value '{hex}'");
             col = new Color(1f, 0f, 1f);
         }
         //ChartDisplay.Program.Warning($"Parsed {hex} into {col} from {rgb}");
