@@ -371,7 +371,7 @@ public class ChartOptions {
     public Color FgColor, BgColor, GoodColor, BadColor;
     public float WarnAbove, WarnBelow;
 
-    public ChartOptions(bool horizontal = true, bool show_title = true, bool show_cur = true, bool show_avg = true, bool show_max = false, bool show_scale = true, string title = "", string unit = "", int num_bars = 30, float warn_above = Single.NaN, float warn_below = Single.NaN) {
+    public ChartOptions(Color fg_color, Color bg_color, Color good_color, Color bad_color, bool horizontal = true, bool show_title = true, bool show_cur = true, bool show_avg = true, bool show_max = false, bool show_scale = true, string title = "", string unit = "", int num_bars = 30, float warn_above = Single.NaN, float warn_below = Single.NaN) {
         Horizontal = horizontal;
         ShowTitle = show_title;
         ShowCur = show_cur;
@@ -381,10 +381,10 @@ public class ChartOptions {
         Title = title;
         Unit = unit;
         NumBars = num_bars;
-        FgColor = new Color(0.8f);
-        BgColor = new Color(0f);
-        GoodColor = new Color(0f, 0.8f, 0f);
-        BadColor = new Color(0.8f, 0f, 0f);
+        FgColor = fg_color;
+        BgColor = bg_color;
+        GoodColor = good_color;
+        BadColor = bad_color;
         WarnAbove = warn_above;
         WarnBelow = warn_below;
     }
@@ -764,11 +764,6 @@ public class Chart {
         }
     }
 
-    // FIXME: still needed?
-    public void AddBuffer(DrawBuffer buffer, Vector2 offset, Vector2 size) {
-        AddViewport(new Viewport(buffer, offset, size), new ChartOptions());
-    }
-
     public void RemoveDisplays() {
         displays.Clear();
     }
@@ -870,6 +865,28 @@ public class Chart {
 	}
     }
 
+    static public Color ColorFromHex(string hex) {
+        long rgb;
+        Color col;
+
+        if (hex[0] == '#') {
+            hex = hex.Substring(1);
+        }
+
+        if (long.TryParse(hex, System.Globalization.NumberStyles.HexNumber, null, out rgb)) {
+            col = new Color(
+                (float)((rgb % (256 * 256 * 256)) / (256 * 256)) / 256f,
+                (float)((rgb % (256 * 256)) / 256) / 256f,
+                (float)(rgb % 256) / 256f
+                );
+        } else {
+            // FIXME: warn.
+            col = new Color(1f, 0f, 1f);
+        }
+        //ChartDisplay.Program.Warning($"Parsed {hex} into {col} from {rgb}");
+        return col;
+    }
+
     static public void UpdatePanels(List<IMyTextSurfaceProvider> panels) {
 	// Special logic for ChartPanels, need to set up buffers and read their config.
 	HashSet<long> found_ids = new HashSet<long>(panels.Count);
@@ -882,6 +899,7 @@ public class Chart {
 	bool horizontal, show_title, show_cur, show_avg, show_max, show_scale;
         float warn_above, warn_below;
 	string name, title, unit;
+        Color fg_color, bg_color, good_color, bad_color;
 	for (int i = 0, sz = panels.Count; i < sz; i++) {
 	    IMyTerminalBlock panel = (IMyTerminalBlock)panels[i];
 	    long id = panel.EntityId;
@@ -944,6 +962,10 @@ public class Chart {
 		num_bars = _ini.Get(section, "bars").ToInt32(30);
 		warn_above = _ini.Get(section, "warn_above").ToSingle(Single.NaN);
 		warn_below = _ini.Get(section, "warn_below").ToSingle(Single.NaN);
+                fg_color = ColorFromHex(_ini.Get(section, "fg_color").ToString("#D0D0D0"));
+                bg_color = ColorFromHex(_ini.Get(section, "bg_color").ToString("#000000"));
+                good_color = ColorFromHex(_ini.Get(section, "good_color").ToString("#00D000"));
+                bad_color = ColorFromHex(_ini.Get(section, "bad_color").ToString("#D00000"));
 
 		// Hmm, removing it here means we can't have multiples of same chart on same panel
 		// TODO: maybe keep track of those chart names we've removed already in the sections loop?
@@ -963,7 +985,11 @@ public class Chart {
                         unit: unit,
                         num_bars: num_bars,
                         warn_above: warn_above,
-                        warn_below: warn_below
+                        warn_below: warn_below,
+                        fg_color: fg_color,
+                        bg_color: bg_color,
+                        good_color: good_color,
+                        bad_color: bad_color
                         ));
 	    }
 	}

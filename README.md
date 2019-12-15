@@ -145,8 +145,12 @@ show_scale | true | Should the scale (max Y point) be displayed in the bottom bo
 title | chart name | Title to display for the chart.
 unit | varies | Unit to use for display. (Note: Doesn't change chart scaling, just the unit label.)
 bars | 30 | Number of bars to display in the chart. Max is 100.
-warn_above | Not Set | If set, colour bars with value higher than this in red. Bars below will be green.
-warn_below | Not Set | If set, colour bars with value lower than this in red. Bars above will be green.
+warn_above | Not Set | If set, colour bars with value higher than this in red (or bad_color if set). Bars below will be green (or good_color if set).
+warn_below | Not Set | If set, colour bars with value lower than this in red (or bad_color if set). Bars above will be green (or good_color if set).
+fg_color | #D0D0D0 | Hex value for the foreground colour.
+bg_color | #000000 | Hex value for the background colour.
+good_color | #00D000 | Hex value for highlighting "good" values.
+bad_color | #D00000 | Hex value for highlighting "bad" values.
 
 FIXME: (not currently true) The scale is automatically set by some heuristics that sorta make sense and seem to work for me.
 
