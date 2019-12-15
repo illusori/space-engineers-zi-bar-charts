@@ -199,8 +199,7 @@ public double TimeAsUsec(double t) {
 
 public void FindPubSubBlocks() {
     _pubsub_blocks.Clear();
-    // FIXME: probably want to check block.IsSameConstructAs(Me)
-    GridTerminalSystem.GetBlocksOfType<IMyProgrammableBlock>(_pubsub_blocks, block => block.CustomName.Contains(PUBSUB_SCRIPT_NAME));
+    GridTerminalSystem.GetBlocksOfType<IMyProgrammableBlock>(_pubsub_blocks, block => block.CustomName.Contains(PUBSUB_SCRIPT_NAME) && block.IsSameConstructAs(Me));
     IssueEvent("pubsub.register", $"datapoint.issue {Me.EntityId}");
     IssueEvent("pubsub.register", $"dataset.create {Me.EntityId}");
 }
@@ -216,7 +215,7 @@ public void IssueEvent(string event_name, string event_args) {
 public void FindPanels() {
     for (int i = 0; i < SIZE_PANELS; i++) {
         _panels[i].Clear();
-        GridTerminalSystem.GetBlocksOfType<IMyTextSurfaceProvider>(_panels[i], block => ((IMyTerminalBlock)block).CustomName.Contains(_panel_tags[i]));
+        GridTerminalSystem.GetBlocksOfType<IMyTextSurfaceProvider>(_panels[i], block => ((IMyTerminalBlock)block).CustomName.Contains(_panel_tags[i]) && ((IMyTerminalBlock)block).IsSameConstructAs(Me));
         if (i == PANELS_CHART)
             continue;
         for (int j = 0, szj = _panels[i].Count; j < szj; j++) {
