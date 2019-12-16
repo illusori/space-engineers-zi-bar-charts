@@ -1,5 +1,5 @@
 ﻿string _script_name = "Zephyr Industries Bar Charts";
-string _script_version = "2.0.0";
+string _script_version = "2.0.1";
 
 string _script_title = null;
 string _script_title_nl = null;
@@ -365,12 +365,12 @@ public class Viewport {
 
 public class ChartOptions {
     public bool Horizontal, ShowTitle, ShowCur, ShowAvg, ShowMax, ShowScale;
-    public string Title, Unit;
+    public string Title, Unit, Font;
     public int NumBars;
     public Color FgColor, BgColor, GoodColor, BadColor;
-    public float WarnAbove, WarnBelow;
+    public float WarnAbove, WarnBelow, FontSize, FramePadding, Scaling;
 
-    public ChartOptions(Color fg_color, Color bg_color, Color good_color, Color bad_color, bool horizontal = true, bool show_title = true, bool show_cur = true, bool show_avg = true, bool show_max = false, bool show_scale = true, string title = "", string unit = "", int num_bars = 30, float warn_above = Single.NaN, float warn_below = Single.NaN) {
+    public ChartOptions(Color fg_color, Color bg_color, Color good_color, Color bad_color, bool horizontal = true, bool show_title = true, bool show_cur = true, bool show_avg = true, bool show_max = false, bool show_scale = true, string title = "", string unit = "", float scaling = 1f, int num_bars = 30, float warn_above = Single.NaN, float warn_below = Single.NaN, string font = "Monospace", float font_size = 0.6f, float frame_padding = 24f) {
         Horizontal = horizontal;
         ShowTitle = show_title;
         ShowCur = show_cur;
@@ -379,6 +379,7 @@ public class ChartOptions {
         ShowScale = show_scale;
         Title = title;
         Unit = unit;
+        Scaling = scaling;
         NumBars = num_bars;
         FgColor = fg_color;
         BgColor = bg_color;
@@ -386,6 +387,9 @@ public class ChartOptions {
         BadColor = bad_color;
         WarnAbove = warn_above;
         WarnBelow = warn_below;
+        Font = font;
+        FontSize = font_size;
+        FramePadding = frame_padding;
     }
 }
 
@@ -459,15 +463,6 @@ public class ChartDisplay {
     const int FRAME_STATUS        = 8;
     const int SIZE_FRAME          = 9;
 
-    // Alternatives if you don't like Monospace.
-    //const float FRAME_LABEL_SCALE = 0.8f;
-    //const float FRAME_PADDING = 32f;
-    //const string FRAME_FONT = "Debug";
-
-    const float FRAME_LABEL_SCALE = 0.6f;
-    const float FRAME_PADDING = 24f;
-    const string FRAME_FONT = "Monospace";
-
     public bool IsDirty {
         get { return FrameViewport.IsDirty; } // FIXME: needed anymore?
         //set { Viewport.IsDirty = value; }
@@ -475,9 +470,10 @@ public class ChartDisplay {
 
     public ChartDisplay(Viewport viewport, ChartOptions options) {
         FrameViewport = viewport;
-        Vector2 padding = new Vector2(FRAME_PADDING);
-        ChartViewport = FrameViewport.SubViewport(padding + 2f, (FrameViewport.Size - padding * 2f) - 4f);
         Options = options;
+
+        Vector2 padding = new Vector2(Options.FramePadding);
+        ChartViewport = FrameViewport.SubViewport(padding + 2f, (FrameViewport.Size - padding * 2f) - 4f);
 
         ConfigureViewport();
     }
@@ -496,9 +492,9 @@ public class ChartDisplay {
             Frame.Add(new SlottedSprite(FrameViewport, null));
         }
         // Two square sprites so we get a consistent line thickness, rather than scaling SquareHollow
-        Vector2 outer = new Vector2((float)(((int)FRAME_PADDING / 2) - 1));
+        Vector2 outer = new Vector2((float)(((int)Options.FramePadding / 2) - 1));
         Vector2 outer_size = FrameViewport.Size - outer * 2f;
-        Vector2 inner = new Vector2((float)(((int)FRAME_PADDING / 2) + 1));
+        Vector2 inner = new Vector2((float)(((int)Options.FramePadding / 2) + 1));
         Vector2 inner_size = FrameViewport.Size - inner * 2f;
 
         //ChartDisplay.Program.Warning($"outer:{outer} size:{outer_size}\n    inner:{inner} size:{inner_size}");
@@ -520,23 +516,23 @@ public class ChartDisplay {
 
         if (Options.ShowTitle) {
             label = $"{Options.Title}";
-            sprite = MySprite.CreateText(label, FRAME_FONT, Options.FgColor, FRAME_LABEL_SCALE, TextAlignment.CENTER);
-            sprite.Size = FrameViewport.Buffer.Surface.MeasureStringInPixels(new StringBuilder(label), FRAME_FONT, FRAME_LABEL_SCALE);
+            sprite = MySprite.CreateText(label, Options.Font, Options.FgColor, Options.FontSize, TextAlignment.CENTER);
+            sprite.Size = FrameViewport.Buffer.Surface.MeasureStringInPixels(new StringBuilder(label), Options.Font, Options.FontSize);
             //SlottedSprite.Program.Warning($"  setting size {sprite.Size} ({label})");
             if (sprite.Size?.X < inner_size.X) {
-                Vector2 border = new Vector2((float)((int)sprite.Size?.X + 11), FRAME_PADDING - 2f);
+                Vector2 border = new Vector2((float)((int)sprite.Size?.X + 11), Options.FramePadding - 2f);
                 //SlottedSprite.Program.Warning($"  Title size fits");
                 Frame[FRAME_TITLE].Sprite = sprite;
-                Frame[FRAME_TITLE].Position = new Vector2(FrameViewport.Size.X / 2f, (FRAME_PADDING - (float)sprite.Size?.Y) / 2f);
+                Frame[FRAME_TITLE].Position = new Vector2(FrameViewport.Size.X / 2f, (Options.FramePadding - (float)sprite.Size?.Y) / 2f);
                 Frame[FRAME_TITLE_BG].Sprite = new MySprite(SpriteType.TEXTURE, "SquareSimple",
                     size: border - 2f,
                     color: Options.BgColor);
-                Frame[FRAME_TITLE_BG].Position = new Vector2(FrameViewport.Size.X / 2f, FRAME_PADDING / 2f);
+                Frame[FRAME_TITLE_BG].Position = new Vector2(FrameViewport.Size.X / 2f, Options.FramePadding / 2f);
                 //Frame[FRAME_TITLE_BG].Size = Frame[FRAME_TITLE_BG].Sprite?.Size;
                 Frame[FRAME_TITLE_BORDER].Sprite = new MySprite(SpriteType.TEXTURE, "SquareSimple",
                     size: border,
                     color: Options.FgColor);
-                Frame[FRAME_TITLE_BORDER].Position = new Vector2(FrameViewport.Size.X / 2f, FRAME_PADDING / 2f);
+                Frame[FRAME_TITLE_BORDER].Position = new Vector2(FrameViewport.Size.X / 2f, Options.FramePadding / 2f);
                 //Frame[FRAME_TITLE_BORDER].Size = Frame[FRAME_TITLE_BORDER].Sprite?.Size;
             }
         }
@@ -571,43 +567,43 @@ public class ChartDisplay {
         if (Options.ShowCur || Options.ShowAvg || Options.ShowMax || Options.ShowScale) {
             List<string> segments = new List<string>(2);
             if (Options.ShowCur) {
-                label = $"cur:{SampleCur,5:G4}{Options.Unit}";
+                label = $"cur:{SampleCur * (double)Options.Scaling,5:G4}{Options.Unit}";
                 segments.Add(label);
             }
             if (Options.ShowAvg) {
-        	float avg = (float)SampleTotal / (float)NumSamples;
+        	float avg = Options.Scaling * (float)SampleTotal / (float)NumSamples;
                 label = $"avg:{avg,5:G4}{Options.Unit}";
                 segments.Add(label);
             }
             if (Options.ShowMax) {
-                label = $"max:{SampleMax,5:G4}{Options.Unit}";
+                label = $"max:{SampleMax * (double)Options.Scaling,5:G4}{Options.Unit}";
                 segments.Add(label);
             }
             if (Options.ShowScale) {
                 string dim = Options.Horizontal ? "Y" : "X";
-                label = $"{dim}:{Scale,6:G5}{Options.Unit}";
+                label = $"{dim}:{Scale * (double)Options.Scaling,6:G5}{Options.Unit}";
                 segments.Add(label);
             }
             label = string.Join(" ", segments);
             // FIXME: this should be saved only built once in configure
-            Vector2 inner = new Vector2((float)(((int)FRAME_PADDING / 2) + 1));
+            Vector2 inner = new Vector2((float)(((int)Options.FramePadding / 2) + 1));
             Vector2 inner_size = FrameViewport.Size - inner * 2f;
-            MySprite sprite = MySprite.CreateText(label, FRAME_FONT, Options.FgColor, FRAME_LABEL_SCALE, TextAlignment.CENTER);
-            sprite.Size = FrameViewport.Buffer.Surface.MeasureStringInPixels(new StringBuilder(label), FRAME_FONT, FRAME_LABEL_SCALE);
+            MySprite sprite = MySprite.CreateText(label, Options.Font, Options.FgColor, Options.FontSize, TextAlignment.CENTER);
+            sprite.Size = FrameViewport.Buffer.Surface.MeasureStringInPixels(new StringBuilder(label), Options.Font, Options.FontSize);
             //SlottedSprite.Program.Warning($"  setting status size {sprite.Size} ({label})");
             if (sprite.Size?.X < inner_size.X) {
-                Vector2 border = new Vector2((float)((int)sprite.Size?.X + 11), FRAME_PADDING - 2f);
+                Vector2 border = new Vector2((float)((int)sprite.Size?.X + 11), Options.FramePadding - 2f);
                 Frame[FRAME_STATUS].Sprite = sprite;
-                Frame[FRAME_STATUS].Position = new Vector2(FrameViewport.Size.X / 2f, FrameViewport.Size.Y - FRAME_PADDING + (FRAME_PADDING - (float)sprite.Size?.Y) / 2f);
+                Frame[FRAME_STATUS].Position = new Vector2(FrameViewport.Size.X / 2f, FrameViewport.Size.Y - Options.FramePadding + (Options.FramePadding - (float)sprite.Size?.Y) / 2f);
                 Frame[FRAME_STATUS_BG].Sprite = new MySprite(SpriteType.TEXTURE, "SquareSimple",
                     size: border - 2f,
                     color: Options.BgColor);
-                Frame[FRAME_STATUS_BG].Position = new Vector2(FrameViewport.Size.X / 2f, FrameViewport.Size.Y - FRAME_PADDING / 2f);
+                Frame[FRAME_STATUS_BG].Position = new Vector2(FrameViewport.Size.X / 2f, FrameViewport.Size.Y - Options.FramePadding / 2f);
                 //Frame[FRAME_STATUS_BG].Size = Frame[FRAME_STATUS_BG].Sprite?.Size;
                 Frame[FRAME_STATUS_BORDER].Sprite = new MySprite(SpriteType.TEXTURE, "SquareSimple",
                     size: border,
                     color: Options.FgColor);
-                Frame[FRAME_STATUS_BORDER].Position = new Vector2(FrameViewport.Size.X / 2f, FrameViewport.Size.Y - FRAME_PADDING / 2f);
+                Frame[FRAME_STATUS_BORDER].Position = new Vector2(FrameViewport.Size.X / 2f, FrameViewport.Size.Y - Options.FramePadding / 2f);
                 //Frame[FRAME_STATUS_BORDER].Size = Frame[FRAME_STATUS_BORDER].Sprite?.Size;
             }
         }
@@ -902,8 +898,8 @@ public class Chart {
 	int width, height, x, y, num_bars, config_hash, surface_id;
         long combo_id;
 	bool horizontal, show_title, show_cur, show_avg, show_max, show_scale;
-        float warn_above, warn_below;
-	string name, title, unit, surface_name;
+        float warn_above, warn_below, font_size, frame_padding, scaling;
+	string name, title, unit, surface_name, font;
         Color fg_color, bg_color, good_color, bad_color;
 
 	for (int i = 0, sz = panels.Count; i < sz; i++) {
@@ -954,6 +950,7 @@ public class Chart {
 		show_scale = _ini.Get(section, "show_scale").ToBoolean(true);
                 title = _ini.Get(section, "title").ToString(name);
                 unit = _ini.Get(section, "unit").ToString(chart.Unit); // FIXME: prob gets overwritten by create commands
+                scaling = _ini.Get(section, "scaling").ToSingle(1f);
 		num_bars = _ini.Get(section, "bars").ToInt32(30);
 		warn_above = _ini.Get(section, "warn_above").ToSingle(Single.NaN);
 		warn_below = _ini.Get(section, "warn_below").ToSingle(Single.NaN);
@@ -961,6 +958,16 @@ public class Chart {
                 bg_color = ColorFromHex(_ini.Get(section, "bg_color").ToString("#000000"));
                 good_color = ColorFromHex(_ini.Get(section, "good_color").ToString("#00D000"));
                 bad_color = ColorFromHex(_ini.Get(section, "bad_color").ToString("#D00000"));
+                font = _ini.Get(section, "font").ToString("Monospace");
+                font_size = _ini.Get(section, "font_size").ToSingle(1f);
+                frame_padding = _ini.Get(section, "frame_padding").ToSingle(24f);
+                // TODO: add border_width
+
+                font_size *= 0.6f; // Normalize at 0.6f.
+
+                // Rescale these into actual unit values, rather than the user's ones.
+                warn_above /= scaling;
+                warn_below /= scaling;
 
                 surface_id = GetSurfaceIdWithName((IMyTextSurfaceProvider)panel, surface_name);
                 if (surface_id == -1) {
@@ -1006,13 +1013,17 @@ public class Chart {
                         show_scale: show_scale,
                         title: title,
                         unit: unit,
+                        scaling: scaling,
                         num_bars: num_bars,
                         warn_above: warn_above,
                         warn_below: warn_below,
                         fg_color: fg_color,
                         bg_color: bg_color,
                         good_color: good_color,
-                        bad_color: bad_color
+                        bad_color: bad_color,
+                        font: font,
+                        font_size: font_size,
+                        frame_padding: frame_padding
                         ));
 	    }
 	}

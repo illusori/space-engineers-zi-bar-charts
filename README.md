@@ -145,6 +145,7 @@ show_max | false | Should the max value of the displayed bars be shown?
 show_scale | true | Should the scale (max Y point) be displayed in the bottom border?
 title | chart name | Title to display for the chart.
 unit | varies | Unit to use for display. (Note: Doesn't change chart scaling, just the unit label.)
+scaling | 1.0 | How much to scale values by for display. Use 1000 to turn kg into tonnes. Or 0.0001 to turn tonnes into kg. Use `unit` to set the unit label.
 bars | 30 | Number of bars to display in the chart. Max is 100.
 warn_above | Not Set | If set, colour bars with value higher than this in red (or bad_color if set). Bars below will be green (or good_color if set).
 warn_below | Not Set | If set, colour bars with value lower than this in red (or bad_color if set). Bars above will be green (or good_color if set).
@@ -152,6 +153,9 @@ fg_color | #D0D0D0 | Hex value for the foreground colour.
 bg_color | #000000 | Hex value for the background colour.
 good_color | #00D000 | Hex value for highlighting "good" values.
 bad_color | #D00000 | Hex value for highlighting "bad" values.
+font | Monospace | Font to use for labels. I'd advise Monospace or Debug.
+font_size | 1.0 | Size of font to use compared to default. 0.65 works well for large cockpit panels.
+frame_padding | 24.0 | How much padding to put on frames. Make sure to leave room for labels: 24 is a good value for a size 1 font and 18 is good for a 0.65 font.
 
 FIXME: (not currently true) The scale is automatically set by some heuristics that sorta make sense and seem to work for me.
 
