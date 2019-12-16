@@ -131,11 +131,12 @@ Chart Instr Load | (debug) Instruction count complexity load for each invocation
 
 Option | Default | Description
 :---: | :---: | :---
+surface | 0 | Name or number of the panel to display on if there are multiple panels on the block.
 x | 0 | Panel horizontal percentage to start the chart at. 0 is left of the display.
 y | 0 | Panel vertical percentage to start the chart at. 0 is top of the display.
 width | 100 | Percent of the panel width to span.
 height | 100 | Percent of the panel height to span.
-name | no value | If set it will be used for the chart series instead of the section name.
+chart | no value | If set it will be used for the chart series instead of the section name.
 horizontal | true | If false, the chart will run top to bottom rather than right to left.
 show_title | true | Should the chart title be displayed in the top border?
 show_cur | true | Should the current series value be displayed in the bottom border?
@@ -157,6 +158,19 @@ FIXME: (not currently true) The scale is automatically set by some heuristics th
 The scale is currently set to the maximum value seen in the recorded chart history of the past 100 datapoints.
 
 Setting x/y/width/height values that are outside the bounds of the display will stop the script, you'll need to fix the values then recompile the script. As I said at the top, it isn't very user-friendly right now.
+
+Since you can only use the same section name once, if you wish to display the same chart on multiple displays on the same block you'll have to create a section name of your own, and then use the `chart` setting to pick which chart to display:
+
+```
+[Inv Cargo Free]
+surface = Top Left Display
+
+[Inv Cargo Free 2]
+surface = Bottom Right Display
+chart = Inv Cargo Free
+```
+
+If you want to display the same chart multiple times on the same panel within the same block... that doesn't work right now. Sorry.
 
 ## Sending data to be charted
 

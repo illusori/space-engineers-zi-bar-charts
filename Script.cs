@@ -284,18 +284,17 @@ public class DrawBuffer {
 
     public IMyTextSurface Surface;
     private List<MySprite?> Buffer;
-    public int ConfigHash;
     public Vector2 Size, Offset;
 
     public bool IsDirty { get; private set; }
 
     public DrawBuffer(IMyTextSurface surface) {
         surface.ContentType = ContentType.SCRIPT;
+        surface.Script = null;
         Offset = (surface.TextureSize - surface.SurfaceSize) / 2f;
         Size = surface.SurfaceSize * 1f;
         Buffer = new List<MySprite?>();
         Surface = surface;
-        ConfigHash = 0;
         IsDirty = true;
     }
 
@@ -686,7 +685,8 @@ public class Chart {
     static private Dictionary<string, Chart> _charts = new Dictionary<string, Chart>();
     static public int InstanceCount { get { return _charts.Count(); } }
 
-    // panel.EntityId => DrawBuffer
+    static private Dictionary<long, int> _config_hashes = new Dictionary<long, int>();
+    // (panel.EntityId * 1000) + surface_id => DrawBuffer
     static private Dictionary<long, DrawBuffer> _chart_buffers = new Dictionary<long, DrawBuffer>();
     static public int BufferCount { get { return _chart_buffers.Count(); } }
 
@@ -847,16 +847,6 @@ public class Chart {
 	}
     }
 
-    /* FIXME needed?
-    static public void ResetDirtyChartBuffers() {
-	foreach (DrawBuffer buffer in _chart_buffers.Values) {
-            if (buffer.IsDirty) {
-    	        buffer.Reset();
-            }
-	}
-    }
-     */
-
     static public void FlushDirtyChartBuffers() {
 	foreach (DrawBuffer buffer in _chart_buffers.Values) {
             if (buffer.IsDirty) {
@@ -887,6 +877,20 @@ public class Chart {
         return col;
     }
 
+    // TODO: make extension?
+    static public int GetSurfaceIdWithName(IMyTextSurfaceProvider provider, string name) {
+        int parsed;
+        if (int.TryParse(name, out parsed)) {
+            return parsed;
+        }
+        for (int i = 0; i < provider.SurfaceCount; i++) {
+            if (provider.GetSurface(i).DisplayName == name) {
+                return i;
+            }
+        }
+        return -1;
+    }
+
     static public void UpdatePanels(List<IMyTextSurfaceProvider> panels) {
 	// Special logic for ChartPanels, need to set up buffers and read their config.
 	HashSet<long> found_ids = new HashSet<long>(panels.Count);
@@ -895,41 +899,31 @@ public class Chart {
 	MyIniParseResult parse_result;
 	List<string> sections = new List<string>();
 	Chart chart;
-	int width, height, x, y, num_bars;
+	int width, height, x, y, num_bars, config_hash, surface_id;
+        long combo_id;
 	bool horizontal, show_title, show_cur, show_avg, show_max, show_scale;
         float warn_above, warn_below;
-	string name, title, unit;
+	string name, title, unit, surface_name;
         Color fg_color, bg_color, good_color, bad_color;
+
 	for (int i = 0, sz = panels.Count; i < sz; i++) {
 	    IMyTerminalBlock panel = (IMyTerminalBlock)panels[i];
 	    long id = panel.EntityId;
-	    found_ids.Add(id);
-            //ChartDisplay.Program.Warning($"Configuring: \"{panel.CustomName}\"");
-	    if (!_chart_buffers.TryGetValue(id, out buffer)) {
-                // FIXME: multiple surface handling.
-		buffer = new DrawBuffer(((IMyTextSurfaceProvider)panel).GetSurface(0));
-                //ChartDisplay.Program.Warning($"New panel: \"{panel.Name}\"");
-                //ChartDisplay.Program.Warning($"  panel: \"{panel.DefinitionDisplayNameText}\"");
-                // FIXME: this may be localized???
-                if (panel.DefinitionDisplayNameText.Contains("Corner LCD")) {
-                    // Correct corner LCD surface sizes
-                    if (panel.DefinitionDisplayNameText.Contains("Corner LCD Flat")) {
-                        buffer.Size.Y = 88f;
-                    } else {
-                        buffer.Size.Y = 76f;
-                    }
-                    //ChartDisplay.Program.Warning($"fixing panel: \"{panel.CustomName}\", s{buffer.Size}");
-                }
-		_chart_buffers.Add(id, buffer);
-	    } else {
-		if (panel.CustomData.GetHashCode() == buffer.ConfigHash) {
+
+	    if (_config_hashes.TryGetValue(id, out config_hash)) {
+		if (panel.CustomData.GetHashCode() == config_hash) {
 		    //Program.Warning($"Chart panel skipping unchanged config parse on panel '{panel.CustomName}'");
+                    // Mild hack here... it doesn't matter if we mark unconfigured surfaces as seen.
+                    for (int j = 0; j < ((IMyTextSurfaceProvider)panel).SurfaceCount; j++) {
+        		combo_id = (id * 1000) + (long)j; // h4x
+        		found_ids.Add(combo_id);
+                    }
 		    continue;
 		}
-		//buffer.Clear();
-		//buffer.Save();
-	    }
-	    buffer.ConfigHash = panel.CustomData.GetHashCode();
+            } else {
+                _config_hashes.Add(id, panel.CustomData.GetHashCode());
+            }
+
 	    if (!_ini.TryParse(panel.CustomData, out parse_result)) {
 		Program.Warning($"Chart panel parse error on panel '{panel.CustomName}' line {parse_result.LineNo}: {parse_result.Error}");
 		found_ids.Remove(id); // Move along. Nothing to see. Pretend we never saw the panel.
@@ -939,6 +933,7 @@ public class Chart {
 	    foreach (string section in sections) {
 		//Program.Warning($"Found section {section}");
 		name = _ini.Get(section, "chart").ToString(section);
+		surface_name = _ini.Get(section, "surface").ToString("0");
 		chart = Find(name);
                 /*
 		if (!chart)) {
@@ -953,7 +948,7 @@ public class Chart {
 		// horizontal, etc ChartOptions settings.
 		horizontal = _ini.Get(section, "horizontal").ToBoolean(true);
 		show_title = _ini.Get(section, "show_title").ToBoolean(true);
-		show_cur = _ini.Get(section, "show_cut").ToBoolean(true);
+		show_cur = _ini.Get(section, "show_cur").ToBoolean(true);
 		show_avg = _ini.Get(section, "show_avg").ToBoolean(true);
 		show_max = _ini.Get(section, "show_max").ToBoolean(false);
 		show_scale = _ini.Get(section, "show_scale").ToBoolean(true);
@@ -966,6 +961,34 @@ public class Chart {
                 bg_color = ColorFromHex(_ini.Get(section, "bg_color").ToString("#000000"));
                 good_color = ColorFromHex(_ini.Get(section, "good_color").ToString("#00D000"));
                 bad_color = ColorFromHex(_ini.Get(section, "bad_color").ToString("#D00000"));
+
+                surface_id = GetSurfaceIdWithName((IMyTextSurfaceProvider)panel, surface_name);
+                if (surface_id == -1) {
+                    Program.Warning($"Unable to find surface with name: \"{surface_name}\" on \"{panel.CustomName}\"");
+                    continue;
+                }
+
+		combo_id = (id * 1000) + (long)surface_id; // h4x
+		found_ids.Add(combo_id);
+		//ChartDisplay.Program.Warning($"Configuring: \"{panel.CustomName}\"");
+		if (!_chart_buffers.TryGetValue(combo_id, out buffer)) {
+		    buffer = new DrawBuffer(((IMyTextSurfaceProvider)panel).GetSurface(surface_id));
+		    //Program.Warning($"New panel: \"{panel.Name}\"");
+		    //Program.Warning($"  panel: \"{panel.DefinitionDisplayNameText}\"");
+		    // FIXME: this may be localized???
+                    // FIXME: should probably check it's surface 0 just to be safe.
+		    if (panel.DefinitionDisplayNameText.Contains("Corner LCD")) {
+			// Correct corner LCD surface sizes
+			if (panel.DefinitionDisplayNameText.Contains("Corner LCD Flat")) {
+			    buffer.Size.Y = 88f;
+			} else {
+			    buffer.Size.Y = 76f;
+			}
+			//Program.Warning($"fixing panel: \"{panel.CustomName}\", s{buffer.Size}");
+		    }
+		    _chart_buffers.Add(combo_id, buffer);
+		}
+
 
 		// Hmm, removing it here means we can't have multiples of same chart on same panel
 		// TODO: maybe keep track of those chart names we've removed already in the sections loop?
