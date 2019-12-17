@@ -1,5 +1,5 @@
 ﻿string _script_name = "Zephyr Industries Bar Charts";
-string _script_version = "2.0.1";
+string _script_version = "2.0.2";
 
 string _script_title = null;
 string _script_title_nl = null;
@@ -963,6 +963,10 @@ public class Chart {
                 frame_padding = _ini.Get(section, "frame_padding").ToSingle(24f);
                 // TODO: add border_width
 
+                width = System.Math.Min(System.Math.Max(width, 0), 100);
+                height = System.Math.Min(System.Math.Max(height, 0), 100);
+                x = System.Math.Min(System.Math.Max(x, 0), 100);
+                y = System.Math.Min(System.Math.Max(y, 0), 100);
                 font_size *= 0.6f; // Normalize at 0.6f.
 
                 // Rescale these into actual unit values, rather than the user's ones.

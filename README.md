@@ -161,8 +161,6 @@ FIXME: (not currently true) The scale is automatically set by some heuristics th
 
 The scale is currently set to the maximum value seen in the recorded chart history of the past 100 datapoints.
 
-Setting x/y/width/height values that are outside the bounds of the display will stop the script, you'll need to fix the values then recompile the script. As I said at the top, it isn't very user-friendly right now.
-
 Since you can only use the same section name once, if you wish to display the same chart on multiple displays on the same block you'll have to create a section name of your own, and then use the `chart` setting to pick which chart to display:
 
 ```
