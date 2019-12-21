@@ -1,5 +1,5 @@
 ﻿string _script_name = "Zephyr Industries Bar Charts";
-string _script_version = "2.0.2";
+string _script_version = "2.0.3";
 
 string _script_title = null;
 string _script_title_nl = null;
@@ -365,18 +365,32 @@ public class Viewport {
 
 public class ChartOptions {
     public bool Horizontal, ShowTitle, ShowCur, ShowAvg, ShowMax, ShowScale;
-    public string Title, Unit, Font;
+    public string Title, Unit, Font, CurLabel, AvgLabel, MaxLabel, ScaleLabel;
     public int NumBars;
     public Color FgColor, BgColor, GoodColor, BadColor;
     public float WarnAbove, WarnBelow, FontSize, FramePadding, Scaling;
 
-    public ChartOptions(Color fg_color, Color bg_color, Color good_color, Color bad_color, bool horizontal = true, bool show_title = true, bool show_cur = true, bool show_avg = true, bool show_max = false, bool show_scale = true, string title = "", string unit = "", float scaling = 1f, int num_bars = 30, float warn_above = Single.NaN, float warn_below = Single.NaN, string font = "Monospace", float font_size = 0.6f, float frame_padding = 24f) {
+    public ChartOptions(Color fg_color, Color bg_color, Color good_color, Color bad_color,
+        bool horizontal = true,
+        bool show_title = true,
+        bool show_cur = true, bool show_avg = true, bool show_max = false, bool show_scale = true,
+        string cur_label = "cur:", string avg_label = "avg:", string max_label = "max:",
+        string scale_label = "Y:",
+        string title = "", string unit = "", float scaling = 1f,
+        int num_bars = 30,
+        float warn_above = Single.NaN, float warn_below = Single.NaN,
+        string font = "Monospace", float font_size = 0.6f, float frame_padding = 24f) {
+
         Horizontal = horizontal;
         ShowTitle = show_title;
         ShowCur = show_cur;
         ShowAvg = show_avg;
         ShowMax = show_max;
         ShowScale = show_scale;
+        CurLabel = cur_label;
+        AvgLabel = avg_label;
+        MaxLabel = max_label;
+        ScaleLabel = scale_label == "Y:" ? (Horizontal ? "Y:" : "X:") : scale_label;
         Title = title;
         Unit = unit;
         Scaling = scaling;
@@ -567,21 +581,20 @@ public class ChartDisplay {
         if (Options.ShowCur || Options.ShowAvg || Options.ShowMax || Options.ShowScale) {
             List<string> segments = new List<string>(2);
             if (Options.ShowCur) {
-                label = $"cur:{SampleCur * (double)Options.Scaling,5:G4}{Options.Unit}";
+                label = $"{Options.CurLabel}{SampleCur * (double)Options.Scaling,5:G4}{Options.Unit}";
                 segments.Add(label);
             }
             if (Options.ShowAvg) {
         	float avg = Options.Scaling * (float)SampleTotal / (float)NumSamples;
-                label = $"avg:{avg,5:G4}{Options.Unit}";
+                label = $"{Options.AvgLabel}{avg,5:G4}{Options.Unit}";
                 segments.Add(label);
             }
             if (Options.ShowMax) {
-                label = $"max:{SampleMax * (double)Options.Scaling,5:G4}{Options.Unit}";
+                label = $"{Options.MaxLabel}{SampleMax * (double)Options.Scaling,5:G4}{Options.Unit}";
                 segments.Add(label);
             }
             if (Options.ShowScale) {
-                string dim = Options.Horizontal ? "Y" : "X";
-                label = $"{dim}:{Scale * (double)Options.Scaling,6:G5}{Options.Unit}";
+                label = $"{Options.ScaleLabel}{Scale * (double)Options.Scaling,6:G5}{Options.Unit}";
                 segments.Add(label);
             }
             label = string.Join(" ", segments);
@@ -899,7 +912,7 @@ public class Chart {
         long combo_id;
 	bool horizontal, show_title, show_cur, show_avg, show_max, show_scale;
         float warn_above, warn_below, font_size, frame_padding, scaling;
-	string name, title, unit, surface_name, font;
+	string name, title, unit, surface_name, font, cur_label, avg_label, max_label, scale_label;
         Color fg_color, bg_color, good_color, bad_color;
 
 	for (int i = 0, sz = panels.Count; i < sz; i++) {
@@ -948,6 +961,10 @@ public class Chart {
 		show_avg = _ini.Get(section, "show_avg").ToBoolean(true);
 		show_max = _ini.Get(section, "show_max").ToBoolean(false);
 		show_scale = _ini.Get(section, "show_scale").ToBoolean(true);
+                cur_label = _ini.Get(section, "cur_label").ToString("cur:");
+                avg_label = _ini.Get(section, "avg_label").ToString("avg:");
+                max_label = _ini.Get(section, "max_label").ToString("max:");
+                scale_label = _ini.Get(section, "scale_label").ToString("Y:");
                 title = _ini.Get(section, "title").ToString(name);
                 unit = _ini.Get(section, "unit").ToString(chart.Unit); // FIXME: prob gets overwritten by create commands
                 scaling = _ini.Get(section, "scaling").ToSingle(1f);
@@ -1015,6 +1032,10 @@ public class Chart {
                         show_avg: show_avg,
                         show_max: show_max,
                         show_scale: show_scale,
+                        cur_label: cur_label,
+                        avg_label: avg_label,
+                        max_label: max_label,
+                        scale_label: scale_label,
                         title: title,
                         unit: unit,
                         scaling: scaling,

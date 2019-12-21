@@ -143,6 +143,10 @@ show_cur | true | Should the current series value be displayed in the bottom bor
 show_avg | true | Should the average value of the displayed bars be shown?
 show_max | false | Should the max value of the displayed bars be shown?
 show_scale | true | Should the scale (max Y point) be displayed in the bottom border?
+cur_label | cur: | Label to annotate the current value with.
+avg_label | avg: | Label to annotate the average value with.
+max_label | max: | Label to annotate the max value with.
+scale_label | Y: or X: | Label to annotate the scale value with.
 title | chart name | Title to display for the chart.
 unit | varies | Unit to use for display. (Note: Doesn't change chart scaling, just the unit label.)
 scaling | 1.0 | How much to scale values by for display. Use 1000 to turn kg into tonnes. Or 0.0001 to turn tonnes into kg. Use `unit` to set the unit label.
