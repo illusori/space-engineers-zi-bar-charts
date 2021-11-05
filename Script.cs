@@ -1,6 +1,6 @@
 ﻿const string SCRIPT_FULL_NAME = "Zephyr Industries Bar Charts";
 const string SCRIPT_SHORT_NAME = "ZI Bar Charts";
-const string SCRIPT_VERSION = "3.1.0";
+const string SCRIPT_VERSION = "3.1.1";
 const string SCRIPT_ID = "ZIBarCharts";
 const string PUBSUB_ID = "zi.bar-charts";
 
@@ -395,6 +395,14 @@ public class ChartDisplay {
 
     private List<SlottedSprite> Bars, Frame;
 
+    // Cached state stuff for efficiency.
+    static public Vector2 XMask = new Vector2(1f, 0f);
+    static public Vector2 YMask = new Vector2(0f, 1f);
+    static public Vector2 InvertX = new Vector2(-1f, 1f);
+    private Vector2 _frame_inner_size;
+    private Vector2 _breadth_mask, _length_mask;
+    private Vector2 _bar_length_factor, _bar_breadth, _bar_breadth_pos_factor, _bar_length_pos_factor, _bar_length_zero_offset;
+
     const int FRAME_BG		  = 0;
     const int FRAME_BORDER	  = 1;
     const int FRAME_INNER_BG	  = 2;
@@ -438,9 +446,9 @@ public class ChartDisplay {
 	Vector2 outer = new Vector2((float)(((int)Options.FramePadding / 2) - 1));
 	Vector2 outer_size = FrameViewport.Size - outer * 2f;
 	Vector2 inner = new Vector2((float)(((int)Options.FramePadding / 2) + 1));
-	Vector2 inner_size = FrameViewport.Size - inner * 2f;
+	_frame_inner_size = FrameViewport.Size - inner * 2f;
 
-	//ChartDisplay.Program.Warning($"outer:{outer} size:{outer_size}\n    inner:{inner} size:{inner_size}");
+	//ChartDisplay.Program.Warning($"outer:{outer} size:{outer_size}\n    inner:{inner} size:{_frame_inner_size}");
 	Frame[FRAME_BG].Sprite = new MySprite(SpriteType.TEXTURE, "SquareSimple",
 	    size: FrameViewport.Size,
 	    color: new Color(0f, 0.35f, 0.6f));
@@ -452,17 +460,17 @@ public class ChartDisplay {
 	Frame[FRAME_BORDER].Position = FrameViewport.Size / 2f;
 	//Frame[FRAME_BORDER].Size = outer_size;
 	Frame[FRAME_INNER_BG].Sprite = new MySprite(SpriteType.TEXTURE, "SquareSimple",
-	    size: inner_size,
+	    size: _frame_inner_size,
 	    color: Options.BgColor);
 	Frame[FRAME_INNER_BG].Position = FrameViewport.Size / 2f;
-	//Frame[FRAME_INNER_BG].Size = inner_size;
+	//Frame[FRAME_INNER_BG].Size = _frame_inner_size;
 
 	if (Options.ShowTitle) {
 	    label = $"{Options.Title}";
 	    sprite = MySprite.CreateText(label, Options.Font, Options.FgColor, Options.FontSize, TextAlignment.CENTER);
 	    sprite.Size = FrameViewport.Buffer.Surface.MeasureStringInPixels(new StringBuilder(label), Options.Font, Options.FontSize);
 	    //SlottedSprite.Program.Warning($"	setting size {sprite.Size} ({label})");
-	    if (sprite.Size?.X < inner_size.X) {
+	    if (sprite.Size?.X < _frame_inner_size.X) {
 		Vector2 border = new Vector2((float)((int)sprite.Size?.X + 11), Options.FramePadding - 2f);
 		//SlottedSprite.Program.Warning($"  Title size fits");
 		Frame[FRAME_TITLE].Sprite = sprite;
@@ -490,6 +498,21 @@ public class ChartDisplay {
 		    size: new Vector2(50f),
 		    color: Options.FgColor)));
 	}
+
+	// Funky vector crud to ensure we act on the correct dimension of the vectors.
+	if (Options.Horizontal) {
+	    _breadth_mask = ChartDisplay.XMask;
+	    _length_mask = ChartDisplay.YMask;
+	} else {
+	    _breadth_mask = ChartDisplay.YMask;
+	    _length_mask = ChartDisplay.XMask;
+	}
+
+        _bar_length_factor = _length_mask * ChartViewport.Size;
+        _bar_breadth = _breadth_mask * ((ChartViewport.Size / (float)Bars.Count) - 2f);
+        _bar_breadth_pos_factor = _breadth_mask * ChartViewport.Size / (float)Bars.Count;
+        _bar_length_pos_factor = _length_mask * ChartDisplay.InvertX;
+        _bar_length_zero_offset = ChartDisplay.YMask * ChartViewport.Size;
     }
 
     public void StartDraw() {
@@ -527,13 +550,10 @@ public class ChartDisplay {
 		segments.Add(label);
 	    }
 	    label = string.Join(" ", segments);
-	    // FIXME: this should be saved only built once in configure
-	    Vector2 inner = new Vector2((float)(((int)Options.FramePadding / 2) + 1));
-	    Vector2 inner_size = FrameViewport.Size - inner * 2f;
 	    MySprite sprite = MySprite.CreateText(label, Options.Font, Options.FgColor, Options.FontSize, TextAlignment.CENTER);
 	    sprite.Size = FrameViewport.Buffer.Surface.MeasureStringInPixels(new StringBuilder(label), Options.Font, Options.FontSize);
 	    //SlottedSprite.Program.Warning($"	setting status size {sprite.Size} ({label})");
-	    if (sprite.Size?.X < inner_size.X) {
+	    if (sprite.Size?.X < _frame_inner_size.X) {
 		Vector2 border = new Vector2((float)((int)sprite.Size?.X + 11), Options.FramePadding - 2f);
 		Frame[FRAME_STATUS].Sprite = sprite;
 		Frame[FRAME_STATUS].Position = new Vector2(FrameViewport.Size.X / 2f, FrameViewport.Size.Y - Options.FramePadding + (Options.FramePadding - (float)sprite.Size?.Y) / 2f);
@@ -594,27 +614,11 @@ public class ChartDisplay {
 	    }
 	}
 
-	Vector2 breadth_mask, length_mask;
-
-	// FIXME: constantize and unroll the static vectors.
-
-	// Funky vector crud to ensure we act on the correct dimension of the vectors.
-	if (Options.Horizontal) {
-	    breadth_mask = new Vector2(1f, 0f);
-	    length_mask = new Vector2(0f, 1f);
-	} else {
-	    breadth_mask = new Vector2(0f, 1f);
-	    length_mask = new Vector2(1f, 0f);
-	}
-
 	//ChartDisplay.Program.Log($"DrawBarToVP t{t}, v{val}, m{max}");
-	// FIXME: constantize and unroll the static factors (mask, size, max)
-	slotted_sprite.Size = (length_mask * ChartViewport.Size * (float)val / (float)max) +
-	    (breadth_mask * ((ChartViewport.Size / (float)Bars.Count) - 2f));
+	slotted_sprite.Size = (_bar_length_factor * (float)val / (float)max) + _bar_breadth;
 	// X/Y axis go in opposite directions and start from opposite ends, hence the length madness
-	// FIXME: static vectors
-	slotted_sprite.Position = (breadth_mask * ((float)slot + 0.5f) * ChartViewport.Size / (float)Bars.Count) +
-	    (length_mask * new Vector2(-1f, 1f) * (new Vector2(0f, 1f) * ChartViewport.Size - slotted_sprite.Size / 2f));
+	slotted_sprite.Position = (_bar_breadth_pos_factor * ((float)slot + 0.5f)) +
+	    (_bar_length_pos_factor * (_bar_length_zero_offset - slotted_sprite.Size / 2f));
 	//ChartDisplay.Program.Log($"DrawBarToVP t{t}, v{val}, m{max}\n	   s{slotted_sprite.Size} p{slotted_sprite.Position}");
 	slotted_sprite.Write();
     }
@@ -702,7 +706,7 @@ public class Chart {
 
     public void ConfigureViewports() {
 	for (int d = 0, sz = displays.Count; d < sz; d++) {
-	    displays[d].Options.Title = Title; // Ew. Codesmell.
+	    //displays[d].Options.Title = Title; // Ew. Codesmell.
 	    displays[d].Options.Unit = Unit;
 	    displays[d].ConfigureViewport();
 	}
@@ -972,6 +976,7 @@ public class Chart {
 		    buffer = new DrawBuffer(((IMyTextSurfaceProvider)panel).GetSurface(surface_id));
 		    //Program.Warning($"New panel: \"{panel.Name}\"");
 		    //Program.Warning($"  panel: \"{panel.DefinitionDisplayNameText}\"");
+/* This appears to be fixed in space engineers now.
 		    // FIXME: this may be localized???
 		    // FIXME: should probably check it's surface 0 just to be safe.
 		    if (panel.DefinitionDisplayNameText.Contains("Corner LCD")) {
@@ -983,6 +988,7 @@ public class Chart {
 			}
 			//Program.Warning($"fixing panel: \"{panel.CustomName}\", s{buffer.Size}");
 		    }
+ */
 		    _chart_buffers.Add(combo_id, buffer);
 		}
 
