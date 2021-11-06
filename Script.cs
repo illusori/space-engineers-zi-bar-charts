@@ -1,6 +1,6 @@
 ﻿const string SCRIPT_FULL_NAME = "Zephyr Industries Bar Charts";
 const string SCRIPT_SHORT_NAME = "ZI Bar Charts";
-const string SCRIPT_VERSION = "3.1.1";
+const string SCRIPT_VERSION = "3.2.0";
 const string SCRIPT_ID = "ZIBarCharts";
 const string PUBSUB_ID = "zi.bar-charts";
 
@@ -30,7 +30,7 @@ List<List<IMyTextSurfaceProvider>> _panels = new List<List<IMyTextSurfaceProvide
 List<string> _panel_text = new List<string>(SIZE_PANELS) { "" };
 List<IMyProgrammableBlock> _pubsub_blocks = new List<IMyProgrammableBlock>();
 
-int _last_run_datapoints = 0;
+int _last_run_datapoints = 0, _last_run_chart_updates = 0, _last_run_buffer_flushes = 0;
 
 int _updating = UPDATING_NONE;
 bool _dirty = false;
@@ -83,11 +83,15 @@ public void MainLoop(UpdateType updateSource) {
             MarkClean();
         }
         if (_updating == UPDATING_CHARTS) {
-            if (!Chart.DrawNextChart()) {
+            if (Chart.DrawNextChart()) {
+                _last_run_chart_updates++;
+            } else {
                 _updating = UPDATING_DISPLAYS;
             }
         } else if (_updating == UPDATING_DISPLAYS) {
-            if (!Chart.FlushNextChartBuffer()) {
+            if (Chart.FlushNextChartBuffer()) {
+                _last_run_buffer_flushes++;
+            } else {
 		if (_dirty) {
 		    _updating = UPDATING_CHARTS;
 		    MarkClean();
@@ -107,28 +111,6 @@ public void MainLoop(UpdateType updateSource) {
 	    FindPanels(); // FIXME
 	}
 
-	// FIXME: alternate update and flush?
-	// FIXME: update could update one chart per cycle
-	// FIXME: flush could flush one drawbuffer per cycle
-/*
-        if ((_updating == UPDATING_NONE) && _dirty) {
-            _updating = UPDATING_CHARTS;
-            MarkClean();
-        }
-        if (_updating == UPDATING_CHARTS) {
-	    Chart.UpdateCharts();
-            _updating = UPDATING_DISPLAYS;
-        } else if (_updating == UPDATING_DISPLAYS) {
-	    Chart.FlushChartBuffers();
-            if (_dirty) {
-                _updating = UPDATING_CHARTS;
-                MarkClean();
-            } else {
-                _updating = UPDATING_NONE;
-            }
-        }
- */
-
 	long load_avg = (long)Chart.Find(ZIScript.CHART_LOAD).Avg;
 	long time_avg = (long)Chart.Find(ZIScript.CHART_TIME).Avg;
 	long time_subs_avg = 0; // FIXME
@@ -143,6 +125,9 @@ public void MainLoop(UpdateType updateSource) {
 	    Log($"  [T-{i,-2}] Load {load}% in {time}us (Rx: {time_subs}us/{count_datapoints} points)");
 	}
 	Log($"Charts: {Chart.InstanceCount}, DrawBuffers: {Chart.BufferCount}");
+        Log($"Chart Updates: {_last_run_chart_updates}, DrawBuffer Flushes: {_last_run_buffer_flushes}");
+        _last_run_chart_updates = 0;
+        _last_run_buffer_flushes = 0;
     }
 }
 
@@ -177,6 +162,8 @@ public void EventDatasetCreate(string event_name, object data) {
     // dataset.create <string chart_name, string unit>
     MyTuple<string, string> d = (MyTuple<string, string>)data;
     Chart.Create(d.Item1, d.Item2);
+    Chart.Create($"{d.Item1} x10", d.Item2);
+    Chart.Create($"{d.Item1} x100", d.Item2);
     _zis.Subscribe($"datapoint.issue.{d.Item1}", this.EventDatapointIssue);
 }
 
@@ -184,7 +171,16 @@ public void EventDatapointIssue(string event_name, object data) {
     // datapoint.issue.<chart_name> <string chart_name, double value>
     MyTuple<string, double> d = (MyTuple<string, double>)data;
     //Warning($"rx datapoint {d.Item1}={d.Item2}");
-    Chart.Find(d.Item1).AddDatapoint(d.Item2);
+    Chart chart1 = Chart.Find(d.Item1);
+    chart1.AddDatapoint(d.Item2);
+    if ((chart1.Cycles % 10) == 0) {
+        Chart chart10 = Chart.Find($"{d.Item1} x10");
+        chart10.AddDatapoint(chart1.Avg10);
+        if ((chart10.Cycles % 10) == 0) {
+            Chart chart100 = Chart.Find($"{d.Item1} x100");
+            chart100.AddDatapoint(chart10.Avg10);
+        }
+    }
     _last_run_datapoints++;
 }
 
@@ -415,7 +411,7 @@ public class ChartDisplay {
     const int SIZE_FRAME	  = 9;
 
     public bool IsDirty {
-	get { return FrameViewport.IsDirty; } // FIXME: needed anymore?
+	get { return FrameViewport.IsDirty; }
 	//set { Viewport.IsDirty = value; }
     }
 
@@ -644,16 +640,20 @@ public class Chart {
     public string Title { get; private set; }
     public string Unit { get; private set; }
 
+    // FIXME: is Count really what we need here? flag maybe better
     public bool IsViewed { get { return displays.Count > 0; } }
     public double Max { get { return dataset.Max; } }
     public double Sum { get { return dataset.Sum; } }
     public double Avg { get { return dataset.Avg; } }
+    public double Avg10 { get { return dataset.Avg10; } }
     public int Count { get { return dataset.Count; } }
+    public int Cycles { get { return dataset.Counter; } }
     public bool IsDataDirty { get { return dataset.IsDirty; } }
     public bool IsDisplayDirty {
 	get { return displays.Any(display => display.IsDirty); }
 	//set { foreach (ChartDisplay display in displays) display.IsDirty = value; }
     }
+    public bool IsDirty { get { return IsDataDirty || IsDisplayDirty; } }
 
     /* Reused single-run state objects, only global to avoid realloc/gc-thrashing */
     static MyIni _ini = new MyIni();
@@ -739,101 +739,42 @@ public class Chart {
     }
 
     public void DrawChart() {
-	//if (IsViewed && dataset.IsDirty) {
-	if (IsViewed) {
-	    double max = Max;
-	    StartDraw();
-	    for (int i = 0; i < HISTORY; i++) {
-		//Log($"Update T-{i,-2}");
-		DrawBar(i, dataset.Datapoint(-i), max);
-	    }
-	    EndDraw();
-	    dataset.Clean();
+	double max = Max;
+	StartDraw();
+	for (int i = 0; i < HISTORY; i++) {
+	    //Log($"Update T-{i,-2}");
+	    DrawBar(i, dataset.Datapoint(-i), max);
 	}
+	EndDraw();
+	dataset.Clean();
     }
 
     static public bool DrawNextChart() {
         if (_chart_iterator == null) {
             _chart_iterator = _charts.ToImmutableDictionary().Values.GetEnumerator();
         }
-        if (!_chart_iterator.MoveNext()) {
-            _chart_iterator = null;
-            return false;
+        while (_chart_iterator.MoveNext()) {
+            if (_chart_iterator.Current.IsDirty && _chart_iterator.Current.IsViewed) {
+                _chart_iterator.Current.DrawChart();
+                return true;
+            }
         }
-
-        _chart_iterator.Current.DrawChart();
-        return true;
-    }
-
-    static public void SimpleDrawCharts() {
-	//ResetChartBuffers();
-	// FIXME: Ideally should spread this over different updates. Messes with composition though.
-	foreach (Chart chart in _charts.Values) {
-	    chart.DrawChart();
-	}
-    }
-
-    static public void MinimalDrawCharts() {
-	foreach (Chart chart in _charts.Values) {
-	    if (chart.IsDataDirty) {
-		// FIXME: chart.IsDisplayDirty = true;
-	    }
-	}
-	//ResetDirtyChartBuffers();
-	// FIXME: Ideally should spread this over different updates. Messes with composition though.
-	foreach (Chart chart in _charts.Values) {
-	    if (chart.IsDisplayDirty) {
-		chart.DrawChart();
-	    }
-	}
-    }
-
-    static public void DrawCharts() {
-	UpdateCharts();
-        FlushChartBuffers();
-    }
-
-    static public void UpdateCharts() {
-	SimpleDrawCharts();
-    }
-
-    static public void FlushChartBuffers() {
-        SimpleFlushChartBuffers();
+        _chart_iterator = null;
+        return false;
     }
 
     static public bool FlushNextChartBuffer() {
         if (_buffer_iterator == null) {
             _buffer_iterator = _chart_buffers.ToImmutableDictionary().Values.GetEnumerator();
         }
-        if (!_buffer_iterator.MoveNext()) {
-            _buffer_iterator = null;
-            return false;
+        while (_buffer_iterator.MoveNext()) {
+            if (_buffer_iterator.Current.IsDirty) {
+                _buffer_iterator.Current.Flush();
+                return true;
+            }
         }
-
-        _buffer_iterator.Current.Flush();
-        return true;
-    }
-
-    /* FIXME needed?
-    static public void ResetChartBuffers() {
-	foreach (DrawBuffer buffer in _chart_buffers.Values) {
-	    buffer.Reset();
-	}
-    }
-     */
-
-    static public void SimpleFlushChartBuffers() {
-	foreach (DrawBuffer buffer in _chart_buffers.Values) {
-	    buffer.Flush();
-	}
-    }
-
-    static public void FlushDirtyChartBuffers() {
-	foreach (DrawBuffer buffer in _chart_buffers.Values) {
-	    if (buffer.IsDirty) {
-		buffer.Flush();
-	    }
-	}
+        _buffer_iterator = null;
+        return false;
     }
 
     static public Color ColorFromHex(string hex) {
@@ -1049,7 +990,9 @@ class Dataset {
     public int Count { get { return datapoints.Count(); } }
     public double Max { get { return datapoints.Max(); } }
     public double Sum { get; private set; }
-    public double Avg { get { return Sum / Count; } }
+    public double Sum10 { get; private set; }
+    public double Avg { get { return Sum / (double)Count; } }
+    public double Avg10 { get { return Sum10 / 10.0; } }
 
     public Dataset() {
 	Counter = 0;
@@ -1073,8 +1016,9 @@ class Dataset {
 
     public void AddDatapoint(double datapoint) {
 	Counter++;
-	int now = Offset(0);
+	int now = Offset(0), ago10 = Offset(-10);
 	Sum += datapoint - datapoints[now];
+        Sum10 += datapoint - datapoints[ago10];
 	datapoints[now] = datapoint;
 	IsDirty = true;
         Program.MarkDirty();
@@ -1086,7 +1030,7 @@ class Dataset {
 }
 
 class ZIScript {
-    public const string ZIS_VERSION = "3.0.2";
+    public const string ZIS_VERSION = "3.0.3";
 
     public const string SCRIPT_TITLE = Program.SCRIPT_FULL_NAME + " v" + Program.SCRIPT_VERSION + " (ZIS v" + ZIS_VERSION + ")";
     public const string SCRIPT_TITLE_NL = SCRIPT_TITLE + "\n";
@@ -1259,7 +1203,7 @@ class ZIScript {
 		IssueDatapoint(CHART_EVENTS_TX, (double)tx);
 
 		Log($"[Cycle {_cycles}]\n  Main loops: {_tallies[LAST_RUN_MAIN].Cycles}. Event loops: {_tallies[LAST_RUN_EVENT].Cycles}\n  Events: {rx} received, {tx} transmitted.\n  {_subscriptions.Count()} event listeners.");
-                Log($"  Max event bandwidth: {_max_event.Utilization}% ({_max_event.Rx} of {_max_event.Max} on '{_max_event.Channel}').");
+                Log($"  Max event bandwidth: {_max_event.Utilization}% ({_max_event.Rx} of {_max_event.Max}) on...\n    '{_max_event.Channel}'.");
 		FlushToPanels(_debug_panels);
 
 		_tallies[LAST_RUN_MAIN].Cycles = 0;
