@@ -1,6 +1,6 @@
 ﻿const string SCRIPT_FULL_NAME = "Zephyr Industries Bar Charts";
 const string SCRIPT_SHORT_NAME = "ZI Bar Charts";
-const string SCRIPT_VERSION = "3.2.0";
+const string SCRIPT_VERSION = "3.2.1";
 const string SCRIPT_ID = "ZIBarCharts";
 const string PUBSUB_ID = "zi.bar-charts";
 
@@ -11,7 +11,7 @@ const int SAMPLES     = 10;
 const int PANELS_CHART = 0;
 const int SIZE_PANELS  = 1;
 
-const int UPDATING_NONE     = 0;
+const int UPDATING_NONE	    = 0;
 const int UPDATING_CHARTS   = 1;
 const int UPDATING_DISPLAYS = 2;
 
@@ -78,28 +78,28 @@ public void Warning(string m) { _zis.Warning(m); }
 public void MainLoop(UpdateType updateSource) {
     // Run for Update1 but only if not also Update100.
     if ((updateSource & (UpdateType.Update1 | UpdateType.Update100)) == UpdateType.Update1) {
-        if ((_updating == UPDATING_NONE) && _dirty) {
-            _updating = UPDATING_CHARTS;
-            MarkClean();
-        }
-        if (_updating == UPDATING_CHARTS) {
-            if (Chart.DrawNextChart()) {
-                _last_run_chart_updates++;
-            } else {
-                _updating = UPDATING_DISPLAYS;
-            }
-        } else if (_updating == UPDATING_DISPLAYS) {
-            if (Chart.FlushNextChartBuffer()) {
-                _last_run_buffer_flushes++;
-            } else {
+	if ((_updating == UPDATING_NONE) && _dirty) {
+	    _updating = UPDATING_CHARTS;
+	    MarkClean();
+	}
+	if (_updating == UPDATING_CHARTS) {
+	    if (Chart.DrawNextChart()) {
+		_last_run_chart_updates++;
+	    } else {
+		_updating = UPDATING_DISPLAYS;
+	    }
+	} else if (_updating == UPDATING_DISPLAYS) {
+	    if (Chart.FlushNextChartBuffer()) {
+		_last_run_buffer_flushes++;
+	    } else {
 		if (_dirty) {
 		    _updating = UPDATING_CHARTS;
 		    MarkClean();
 		} else {
 		    _updating = UPDATING_NONE;
 		}
-            }
-        }
+	    }
+	}
     }
     if ((updateSource & UpdateType.Update100) != 0) {
 	_cycles++;
@@ -125,9 +125,10 @@ public void MainLoop(UpdateType updateSource) {
 	    Log($"  [T-{i,-2}] Load {load}% in {time}us (Rx: {time_subs}us/{count_datapoints} points)");
 	}
 	Log($"Charts: {Chart.InstanceCount}, DrawBuffers: {Chart.BufferCount}");
-        Log($"Chart Updates: {_last_run_chart_updates}, DrawBuffer Flushes: {_last_run_buffer_flushes}");
-        _last_run_chart_updates = 0;
-        _last_run_buffer_flushes = 0;
+	Log($"Chart Updates: {_last_run_chart_updates}, DrawBuffer Flushes: {_last_run_buffer_flushes}");
+	Log($"Sprites: {Chart.SpriteCount} ({Chart.SpritesFlushed} flushed)");
+	_last_run_chart_updates = 0;
+	_last_run_buffer_flushes = 0;
     }
 }
 
@@ -174,12 +175,12 @@ public void EventDatapointIssue(string event_name, object data) {
     Chart chart1 = Chart.Find(d.Item1);
     chart1.AddDatapoint(d.Item2);
     if ((chart1.Cycles % 10) == 0) {
-        Chart chart10 = Chart.Find($"{d.Item1} x10");
-        chart10.AddDatapoint(chart1.Avg10);
-        if ((chart10.Cycles % 10) == 0) {
-            Chart chart100 = Chart.Find($"{d.Item1} x100");
-            chart100.AddDatapoint(chart10.Avg10);
-        }
+	Chart chart10 = Chart.Find($"{d.Item1} x10");
+	chart10.AddDatapoint(chart1.Avg10);
+	if ((chart10.Cycles % 10) == 0) {
+	    Chart chart100 = Chart.Find($"{d.Item1} x100");
+	    chart100.AddDatapoint(chart10.Avg10);
+	}
     }
     _last_run_datapoints++;
 }
@@ -210,6 +211,8 @@ public class DrawBuffer {
     public IMyTextSurface Surface;
     private List<MySprite?> Buffer;
     public Vector2 Size, Offset;
+    public int SpriteCount { get { return Buffer.Count; } }
+    public int SpritesFlushed;
 
     public bool IsDirty { get; private set; }
 
@@ -245,12 +248,14 @@ public class DrawBuffer {
     }
 
     public void Flush() {
+	SpritesFlushed = 0;
 	if (Surface != null) {
 	    using (var frame = Surface.DrawFrame()) {
 		foreach (MySprite? sprite in Buffer) {
 		    if (sprite != null) {
 			//DrawBuffer.Program.Log($"Frame add p{sprite.Value.Position} s{sprite.Value.Size}.");
 			frame.Add(sprite.Value);
+			SpritesFlushed++;
 		    }
 		}
 	    }
@@ -289,14 +294,14 @@ public class Viewport {
 }
 
 public class ChartOptions {
-    public bool Horizontal, ShowTitle, ShowCur, ShowAvg, ShowMax, ShowScale;
+    public bool Horizontal, ShowTitle, ShowCur, ShowAvg, ShowMax, ShowScale, FlipVertical, FlipHorizontal;
     public string Title, Unit, Font, CurLabel, AvgLabel, MaxLabel, ScaleLabel;
     public int NumBars;
     public Color FgColor, BgColor, GoodColor, BadColor;
     public float WarnAbove, WarnBelow, FontSize, FramePadding, Scaling;
 
     public ChartOptions(Color fg_color, Color bg_color, Color good_color, Color bad_color,
-	bool horizontal = true,
+	bool horizontal = true, bool flip_vertical = false, bool flip_horizontal = false,
 	bool show_title = true,
 	bool show_cur = true, bool show_avg = true, bool show_max = false, bool show_scale = true,
 	string cur_label = "cur:", string avg_label = "avg:", string max_label = "max:",
@@ -307,6 +312,8 @@ public class ChartOptions {
 	string font = "Monospace", float font_size = 0.6f, float frame_padding = 24f) {
 
 	Horizontal = horizontal;
+	FlipVertical = flip_vertical;
+	FlipHorizontal = flip_horizontal;
 	ShowTitle = show_title;
 	ShowCur = show_cur;
 	ShowAvg = show_avg;
@@ -384,10 +391,8 @@ public class ChartDisplay {
     public Viewport ChartViewport;
     public ChartOptions Options;
 
-    public int? CurOffset = 0, AvgOffset = 0, MaxOffset = 0, ScaleOffset = 0;
-    public double? SampleCur;
-    public double SampleTotal, SampleMax, Scale;
-    public int NumSamples;
+    public int? CurOffset = 0, AvgOffset = 0, MaxOffset = 0, ScaleOffset = 0; // FIXME: still used?
+    public double SampleCur, SampleTotal, SampleMax, Scale, Zero;
 
     private List<SlottedSprite> Bars, Frame;
 
@@ -395,9 +400,10 @@ public class ChartDisplay {
     static public Vector2 XMask = new Vector2(1f, 0f);
     static public Vector2 YMask = new Vector2(0f, 1f);
     static public Vector2 InvertX = new Vector2(-1f, 1f);
+    static public Vector2 InvertY = new Vector2(1f, -1f);
     private Vector2 _frame_inner_size;
-    private Vector2 _breadth_mask, _length_mask;
-    private Vector2 _bar_length_factor, _bar_breadth, _bar_breadth_pos_factor, _bar_length_pos_factor, _bar_length_zero_offset;
+    private Vector2 _breadth_mask, _length_mask, _direction_mask;
+    private Vector2 _bar_length_factor, _bar_breadth, _bar_breadth_pos_factor, _bar_length_pos_factor, _zero_offset, _bar_breadth_zero_offset, _bar_length_zero_offset;
 
     const int FRAME_BG		  = 0;
     const int FRAME_BORDER	  = 1;
@@ -426,6 +432,7 @@ public class ChartDisplay {
     }
 
     public void ConfigureViewport() {
+	ChartDisplay.Program.Warning("Configuring Viewport");
 	ConfigureFrameViewport();
 	ConfigureChartViewport();
     }
@@ -504,19 +511,32 @@ public class ChartDisplay {
 	    _length_mask = ChartDisplay.XMask;
 	}
 
-        _bar_length_factor = _length_mask * ChartViewport.Size;
-        _bar_breadth = _breadth_mask * ((ChartViewport.Size / (float)Bars.Count) - 2f);
-        _bar_breadth_pos_factor = _breadth_mask * ChartViewport.Size / (float)Bars.Count;
-        _bar_length_pos_factor = _length_mask * ChartDisplay.InvertX;
-        _bar_length_zero_offset = ChartDisplay.YMask * ChartViewport.Size;
+	// Invert according to options.
+	// X/Y axis go in opposite directions and start from opposite ends, hence the invert
+	_direction_mask = ChartDisplay.InvertY;
+	_zero_offset = ChartDisplay.YMask;
+	if (Options.FlipHorizontal) {
+	    _direction_mask *= ChartDisplay.InvertX;
+	    _zero_offset += ChartDisplay.XMask;
+	}
+	if (Options.FlipVertical) {
+	    _direction_mask *= ChartDisplay.InvertY;
+	    _zero_offset -= ChartDisplay.YMask;
+	}
+	_zero_offset *= ChartViewport.Size;
+
+	_bar_length_factor = _length_mask * ChartViewport.Size;
+	_bar_breadth = _breadth_mask * ((ChartViewport.Size / (float)Bars.Count) - 2f);
+	_bar_breadth_zero_offset = _zero_offset * _breadth_mask;
+	_bar_breadth_pos_factor = _breadth_mask * _direction_mask * ChartViewport.Size / (float)Bars.Count;
+	_bar_length_pos_factor = _length_mask * _direction_mask;
     }
 
     public void StartDraw() {
-	SampleCur   = null;
 	SampleTotal = 0.0;
 	SampleMax   = 0.0;
 	Scale	    = 0.0;
-	NumSamples  = 1;
+	Zero	    = 0.0;
     }
 
     public void EndDraw() {
@@ -533,7 +553,7 @@ public class ChartDisplay {
 		segments.Add(label);
 	    }
 	    if (Options.ShowAvg) {
-		float avg = Options.Scaling * (float)SampleTotal / (float)NumSamples;
+		float avg = Options.Scaling * (float)SampleTotal / (float)Options.NumBars;
 		label = $"{Options.AvgLabel}{avg,5:G4}{Options.Unit}";
 		segments.Add(label);
 	    }
@@ -574,8 +594,29 @@ public class ChartDisplay {
 	}
     }
 
-    public void DrawBars() {
-	// FIXME: move in here and access dataset ourselves.
+    public void DrawBars(Dataset dataset) {
+	double max = dataset.Max;
+	double min = dataset.Min;
+
+	if (min < 0.0) {
+	    // Lower-bound max at zero, to ensure origin is on display.
+	    if (max <= 0.0) {
+		max = 0.0;
+	    }
+	    Scale = max - min;
+	    Zero = -min / Scale;
+	} else {
+	    Scale = max;
+	    Zero = 0.0;
+	}
+
+	SampleCur = dataset.Datapoint(0);
+
+	_bar_length_zero_offset = (_zero_offset * _length_mask) +
+	    _bar_length_factor * _direction_mask * (float)Zero;
+	for (int t = 0; t < Options.NumBars; t++) {
+	    DrawBar(t, dataset.Datapoint(-t), max);
+	}
     }
 
     // TODO: could use circular buffer and only update position, not size.
@@ -588,13 +629,9 @@ public class ChartDisplay {
 	    return;
 
 	// FIXME: Hmm, this is awkward if we aren't redrawing all bars.
-	if (!SampleCur.HasValue)
-	    SampleCur = val;
 	SampleTotal += val;
 	if (val > SampleMax)
 	    SampleMax = val;
-	Scale = max;
-	NumSamples++;
 
 	SlottedSprite slotted_sprite = Bars[slot];
 
@@ -611,10 +648,10 @@ public class ChartDisplay {
 	}
 
 	//ChartDisplay.Program.Log($"DrawBarToVP t{t}, v{val}, m{max}");
-	slotted_sprite.Size = (_bar_length_factor * (float)val / (float)max) + _bar_breadth;
-	// X/Y axis go in opposite directions and start from opposite ends, hence the length madness
-	slotted_sprite.Position = (_bar_breadth_pos_factor * ((float)slot + 0.5f)) +
-	    (_bar_length_pos_factor * (_bar_length_zero_offset - slotted_sprite.Size / 2f));
+	slotted_sprite.Size = (_bar_length_factor * (float)val / (float)Scale) + _bar_breadth;
+	slotted_sprite.Position =
+	    _bar_breadth_zero_offset + (_bar_breadth_pos_factor * ((float)slot + 0.5f)) +
+	    _bar_length_zero_offset + (_bar_length_pos_factor * (slotted_sprite.Size / 2f));
 	//ChartDisplay.Program.Log($"DrawBarToVP t{t}, v{val}, m{max}\n	   s{slotted_sprite.Size} p{slotted_sprite.Position}");
 	slotted_sprite.Write();
     }
@@ -633,6 +670,8 @@ public class Chart {
     static private Dictionary<long, DrawBuffer> _chart_buffers = new Dictionary<long, DrawBuffer>();
     static public int BufferCount { get { return _chart_buffers.Count(); } }
     static private IEnumerator<DrawBuffer> _buffer_iterator = null;
+    static public int SpriteCount { get { return _chart_buffers.Values.Aggregate(0, (c, v) => c + v.SpriteCount); } }
+    static public int SpritesFlushed { get { return _chart_buffers.Values.Aggregate(0, (c, v) => c + v.SpritesFlushed); } }
 
     private List<ChartDisplay> displays;
     private Dataset dataset;
@@ -643,6 +682,7 @@ public class Chart {
     // FIXME: is Count really what we need here? flag maybe better
     public bool IsViewed { get { return displays.Count > 0; } }
     public double Max { get { return dataset.Max; } }
+    public double Min { get { return dataset.Min; } }
     public double Sum { get { return dataset.Sum; } }
     public double Avg { get { return dataset.Avg; } }
     public double Avg10 { get { return dataset.Avg10; } }
@@ -720,61 +760,63 @@ public class Chart {
 	displays.RemoveAll(display => display.FrameViewport.Buffer == buffer);
     }
 
-    public void DrawBar(int t, double val, double max) {
+    public void StartDraw() {
 	for (int d = 0, sz = displays.Count; d < sz; d++) {
-	    displays[d].DrawBar(t, val, max);
+	    if (IsDataDirty || displays[d].IsDirty) {
+		displays[d].StartDraw();
+	    }
 	}
     }
 
-    public void StartDraw() {
+    public void DrawBars() {
 	for (int d = 0, sz = displays.Count; d < sz; d++) {
-	    displays[d].StartDraw();
+	    if (IsDataDirty || displays[d].IsDirty) {
+		displays[d].DrawBars(dataset);
+	    }
 	}
     }
 
     public void EndDraw() {
 	for (int d = 0, sz = displays.Count; d < sz; d++) {
-	    displays[d].EndDraw();
+	    if (IsDataDirty || displays[d].IsDirty) {
+		displays[d].EndDraw();
+	    }
 	}
     }
 
     public void DrawChart() {
-	double max = Max;
 	StartDraw();
-	for (int i = 0; i < HISTORY; i++) {
-	    //Log($"Update T-{i,-2}");
-	    DrawBar(i, dataset.Datapoint(-i), max);
-	}
+	DrawBars();
 	EndDraw();
 	dataset.Clean();
     }
 
     static public bool DrawNextChart() {
-        if (_chart_iterator == null) {
-            _chart_iterator = _charts.ToImmutableDictionary().Values.GetEnumerator();
-        }
-        while (_chart_iterator.MoveNext()) {
-            if (_chart_iterator.Current.IsDirty && _chart_iterator.Current.IsViewed) {
-                _chart_iterator.Current.DrawChart();
-                return true;
-            }
-        }
-        _chart_iterator = null;
-        return false;
+	if (_chart_iterator == null) {
+	    _chart_iterator = _charts.ToImmutableDictionary().Values.GetEnumerator();
+	}
+	while (_chart_iterator.MoveNext()) {
+	    if (_chart_iterator.Current.IsDirty && _chart_iterator.Current.IsViewed) {
+		_chart_iterator.Current.DrawChart();
+		return true;
+	    }
+	}
+	_chart_iterator = null;
+	return false;
     }
 
     static public bool FlushNextChartBuffer() {
-        if (_buffer_iterator == null) {
-            _buffer_iterator = _chart_buffers.ToImmutableDictionary().Values.GetEnumerator();
-        }
-        while (_buffer_iterator.MoveNext()) {
-            if (_buffer_iterator.Current.IsDirty) {
-                _buffer_iterator.Current.Flush();
-                return true;
-            }
-        }
-        _buffer_iterator = null;
-        return false;
+	if (_buffer_iterator == null) {
+	    _buffer_iterator = _chart_buffers.ToImmutableDictionary().Values.GetEnumerator();
+	}
+	while (_buffer_iterator.MoveNext()) {
+	    if (_buffer_iterator.Current.IsDirty) {
+		_buffer_iterator.Current.Flush();
+		return true;
+	    }
+	}
+	_buffer_iterator = null;
+	return false;
     }
 
     static public Color ColorFromHex(string hex) {
@@ -824,7 +866,7 @@ public class Chart {
 	Chart chart;
 	int width, height, x, y, num_bars, config_hash, surface_id;
 	long combo_id;
-	bool horizontal, show_title, show_cur, show_avg, show_max, show_scale;
+	bool horizontal, flip_vertical, flip_horizontal, show_title, show_cur, show_avg, show_max, show_scale;
 	float warn_above, warn_below, font_size, frame_padding, scaling;
 	string name, title, unit, surface_name, font, cur_label, avg_label, max_label, scale_label;
 	Color fg_color, bg_color, good_color, bad_color;
@@ -870,6 +912,8 @@ public class Chart {
 		y = _ini.Get(section, "y").ToInt32(0);
 		// horizontal, etc ChartOptions settings.
 		horizontal = _ini.Get(section, "horizontal").ToBoolean(true);
+		flip_vertical = _ini.Get(section, "flip_vertical").ToBoolean(false);
+		flip_horizontal = _ini.Get(section, "flip_horizontal").ToBoolean(false);
 		show_title = _ini.Get(section, "show_title").ToBoolean(true);
 		show_cur = _ini.Get(section, "show_cur").ToBoolean(true);
 		show_avg = _ini.Get(section, "show_avg").ToBoolean(true);
@@ -899,6 +943,7 @@ public class Chart {
 		x = System.Math.Min(System.Math.Max(x, 0), 100);
 		y = System.Math.Min(System.Math.Max(y, 0), 100);
 		font_size *= 0.6f; // Normalize at 0.6f.
+		// FIXME: clamp num_bars to 0..HISTORY
 
 		// Rescale these into actual unit values, rather than the user's ones.
 		warn_above /= scaling;
@@ -943,6 +988,8 @@ public class Chart {
 		    buffer.Size * new Vector2((float)width, (float)height) / 100f,
 		    new ChartOptions(
 			horizontal: horizontal,
+			flip_vertical: flip_vertical,
+			flip_horizontal: flip_horizontal,
 			show_title: show_title,
 			show_cur: show_cur,
 			show_avg: show_avg,
@@ -980,15 +1027,17 @@ public class Chart {
     }
 }
 
-class Dataset {
+public class Dataset {
     static public Program Program { set; get; }
 
     private List<double> datapoints = new List<double>(HISTORY);
 
     public bool IsDirty { get; private set; }
     public int Counter { get; private set; }
+    // FIXME: this is kinda hard coded to HISTORY
     public int Count { get { return datapoints.Count(); } }
-    public double Max { get { return datapoints.Max(); } }
+    public double Max { get; private set; }
+    public double Min { get; private set; }
     public double Sum { get; private set; }
     public double Sum10 { get; private set; }
     public double Avg { get { return Sum / (double)Count; } }
@@ -996,6 +1045,8 @@ class Dataset {
 
     public Dataset() {
 	Counter = 0;
+	Max = 0.0;
+	Min = 0.0;
 	//datapoints = new List<double>(HISTORY);
 	for (int i = 0; i < HISTORY; i++) {
 	    datapoints.Add(0.0);
@@ -1017,11 +1068,22 @@ class Dataset {
     public void AddDatapoint(double datapoint) {
 	Counter++;
 	int now = Offset(0), ago10 = Offset(-10);
-	Sum += datapoint - datapoints[now];
-        Sum10 += datapoint - datapoints[ago10];
+	double old = datapoints[now];
+	Sum += datapoint - old;
+	Sum10 += datapoint - datapoints[ago10];
 	datapoints[now] = datapoint;
+	if (datapoint >= Max) {
+	    Max = datapoint;
+	} else if (old >= Max) {
+	    Max = datapoints.Max();
+	}
+	if (datapoint <= Min) {
+	    Min = datapoint;
+	} else if (old <= Max) {
+	    Min = datapoints.Min();
+	}
 	IsDirty = true;
-        Program.MarkDirty();
+	Program.MarkDirty();
     }
 
     public void Clean() {
@@ -1091,10 +1153,10 @@ class ZIScript {
     List <Tally> _tallies = new List<Tally>(SIZE_LAST_RUN);
 
     class MaxEvent {
-        public double Utilization;
-        public int Rx;
-        public int Max;
-        public string Channel;
+	public double Utilization;
+	public int Rx;
+	public int Max;
+	public string Channel;
     }
 
     MaxEvent _max_event = new MaxEvent() { Utilization = 0.0, Rx = 0, Max = 0, Channel = "" };
@@ -1144,7 +1206,7 @@ class ZIScript {
 	    }
 	    _last_run = LAST_RUN_NONE;
 	    if ((updateSource & UpdateType.Update100) != 0) {
-                //Warning("Issuing times");
+		//Warning("Issuing times");
 		_last_run = LAST_RUN_MAIN;
 		_cycles++;
 
@@ -1165,7 +1227,7 @@ class ZIScript {
 		Log(SCRIPT_TITLE_NL);
 
 		if ((_cycles % 30) == 1) {
-                    //Warning("Looking for updates");
+		    //Warning("Looking for updates");
 		    FindPanels();
 		    CreateDataset(CHART_TIME, "us");
 		    CreateDataset(CHART_MAIN_TIME, "us");
@@ -1178,7 +1240,7 @@ class ZIScript {
 	    }
 
 	    if ((updateSource & (UpdateType.Update1 | UpdateType.Update10 | UpdateType.Update100)) != 0) {
-                //Warning("Running mainloop");
+		//Warning("Running mainloop");
 		_last_run = LAST_RUN_MAIN;
 		if (_mainloop_handler != null) {
 		    _mainloop_handler(updateSource);
@@ -1186,7 +1248,7 @@ class ZIScript {
 	    }
 
 	    if ((updateSource & UpdateType.Update100) != 0) {
-                //Warning("Issuing load/rx/tx/bandwidth");
+		//Warning("Issuing load/rx/tx/bandwidth");
 		double load = (double)(_tallies[LAST_RUN_MAIN].Instr + _tallies[LAST_RUN_EVENT].Instr) * 100.0 / (double)(Prog.Runtime.MaxInstructionCount * (_tallies[LAST_RUN_MAIN].Cycles + _tallies[LAST_RUN_EVENT].Cycles));
 		_tallies[LAST_RUN_MAIN].Instr = 0;
 		_tallies[LAST_RUN_EVENT].Instr = 0;
@@ -1203,43 +1265,43 @@ class ZIScript {
 		IssueDatapoint(CHART_EVENTS_TX, (double)tx);
 
 		Log($"[Cycle {_cycles}]\n  Main loops: {_tallies[LAST_RUN_MAIN].Cycles}. Event loops: {_tallies[LAST_RUN_EVENT].Cycles}\n  Events: {rx} received, {tx} transmitted.\n  {_subscriptions.Count()} event listeners.");
-                Log($"  Max event bandwidth: {_max_event.Utilization}% ({_max_event.Rx} of {_max_event.Max}) on...\n    '{_max_event.Channel}'.");
+		Log($"	Max event bandwidth: {_max_event.Utilization}% ({_max_event.Rx} of {_max_event.Max}) on...\n	'{_max_event.Channel}'.");
 		FlushToPanels(_debug_panels);
 
 		_tallies[LAST_RUN_MAIN].Cycles = 0;
 		_tallies[LAST_RUN_EVENT].Cycles = 0;
-                double utilization = _max_event.Utilization;
-                _max_event.Utilization = 0.0;
-                _max_event.Rx = 0;
-                _max_event.Max = 0;
-                _max_event.Channel = "";
+		double utilization = _max_event.Utilization;
+		_max_event.Utilization = 0.0;
+		_max_event.Rx = 0;
+		_max_event.Max = 0;
+		_max_event.Channel = "";
 
 		IssueDatapoint(CHART_EVENTS_BANDWIDTH, utilization);
 	    }
 
 	    if ((updateSource & UpdateType.IGC) != 0) {
-                //Warning("Consuming events");
+		//Warning("Consuming events");
 		_last_run = LAST_RUN_EVENT;
 		ZIPubSubSubscription subscription;
 		string event_name = argument;
 		if (_subscriptions.TryGetValue(event_name, out subscription)) {
-                    int event_rx = 0;
+		    int event_rx = 0;
 		    while (subscription.Listener.HasPendingMessage) {
 			MyIGCMessage message = subscription.Listener.AcceptMessage();
 			_tallies[_last_run].Rx++;
-                        event_rx++;
+			event_rx++;
 			subscription.Handler(event_name, message.Data);
 		    }
-                    double event_utilization = (double)event_rx * 100.0 / (double)subscription.Listener.MaxWaitingMessages;
-                    if (event_utilization > _max_event.Utilization) {
-                        _max_event.Utilization = event_utilization;
-                        _max_event.Rx = event_rx;
-                        _max_event.Max = subscription.Listener.MaxWaitingMessages;
-                        _max_event.Channel = event_name;
-                    }
+		    double event_utilization = (double)event_rx * 100.0 / (double)subscription.Listener.MaxWaitingMessages;
+		    if (event_utilization > _max_event.Utilization) {
+			_max_event.Utilization = event_utilization;
+			_max_event.Rx = event_rx;
+			_max_event.Max = subscription.Listener.MaxWaitingMessages;
+			_max_event.Channel = event_name;
+		    }
 		}
 	    } else if (argument != null && argument != "") {
-                //Warning("Processing command");
+		//Warning("Processing command");
 		ProcessCommand(argument);
 	    }
 	    if (_last_run != LAST_RUN_NONE) {
