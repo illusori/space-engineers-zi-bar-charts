@@ -1,6 +1,6 @@
 ﻿const string SCRIPT_FULL_NAME = "Zephyr Industries Bar Charts";
 const string SCRIPT_SHORT_NAME = "ZI Bar Charts";
-const string SCRIPT_VERSION = "3.2.1";
+const string SCRIPT_VERSION = "3.2.2";
 const string SCRIPT_ID = "ZIBarCharts";
 const string PUBSUB_ID = "zi.bar-charts";
 
@@ -294,7 +294,7 @@ public class Viewport {
 }
 
 public class ChartOptions {
-    public bool Horizontal, ShowTitle, ShowCur, ShowAvg, ShowMax, ShowScale, FlipVertical, FlipHorizontal;
+    public bool Horizontal, ShowTitle, ShowCur, ShowAvg, ShowMax, ShowScale, FlipVertical, FlipHorizontal, CenterZero;
     public string Title, Unit, Font, CurLabel, AvgLabel, MaxLabel, ScaleLabel;
     public int NumBars;
     public Color FgColor, BgColor, GoodColor, BadColor;
@@ -302,6 +302,7 @@ public class ChartOptions {
 
     public ChartOptions(Color fg_color, Color bg_color, Color good_color, Color bad_color,
 	bool horizontal = true, bool flip_vertical = false, bool flip_horizontal = false,
+        bool center_zero = true,
 	bool show_title = true,
 	bool show_cur = true, bool show_avg = true, bool show_max = false, bool show_scale = true,
 	string cur_label = "cur:", string avg_label = "avg:", string max_label = "max:",
@@ -314,6 +315,7 @@ public class ChartOptions {
 	Horizontal = horizontal;
 	FlipVertical = flip_vertical;
 	FlipHorizontal = flip_horizontal;
+        CenterZero = center_zero;
 	ShowTitle = show_title;
 	ShowCur = show_cur;
 	ShowAvg = show_avg;
@@ -598,11 +600,20 @@ public class ChartDisplay {
 	double max = dataset.Max;
 	double min = dataset.Min;
 
-	if (min < 0.0) {
-	    // Lower-bound max at zero, to ensure origin is on display.
-	    if (max <= 0.0) {
-		max = 0.0;
-	    }
+	// Lower-bound max at zero, to ensure origin is on display.
+	if (max <= 0.0) {
+	    max = 0.0;
+	}
+
+        if (Options.CenterZero) {
+            if (max >= -min) {
+                min = -max;
+            } else {
+                max = -min;
+            }
+        }
+
+        if (min < 0.0) {
 	    Scale = max - min;
 	    Zero = -min / Scale;
 	} else {
@@ -866,7 +877,7 @@ public class Chart {
 	Chart chart;
 	int width, height, x, y, num_bars, config_hash, surface_id;
 	long combo_id;
-	bool horizontal, flip_vertical, flip_horizontal, show_title, show_cur, show_avg, show_max, show_scale;
+	bool horizontal, flip_vertical, flip_horizontal, center_zero, show_title, show_cur, show_avg, show_max, show_scale;
 	float warn_above, warn_below, font_size, frame_padding, scaling;
 	string name, title, unit, surface_name, font, cur_label, avg_label, max_label, scale_label;
 	Color fg_color, bg_color, good_color, bad_color;
@@ -914,6 +925,7 @@ public class Chart {
 		horizontal = _ini.Get(section, "horizontal").ToBoolean(true);
 		flip_vertical = _ini.Get(section, "flip_vertical").ToBoolean(false);
 		flip_horizontal = _ini.Get(section, "flip_horizontal").ToBoolean(false);
+		center_zero = _ini.Get(section, "center_zero").ToBoolean(false);
 		show_title = _ini.Get(section, "show_title").ToBoolean(true);
 		show_cur = _ini.Get(section, "show_cur").ToBoolean(true);
 		show_avg = _ini.Get(section, "show_avg").ToBoolean(true);
@@ -990,6 +1002,7 @@ public class Chart {
 			horizontal: horizontal,
 			flip_vertical: flip_vertical,
 			flip_horizontal: flip_horizontal,
+                        center_zero: center_zero,
 			show_title: show_title,
 			show_cur: show_cur,
 			show_avg: show_avg,
@@ -1153,10 +1166,10 @@ class ZIScript {
     List <Tally> _tallies = new List<Tally>(SIZE_LAST_RUN);
 
     class MaxEvent {
-	public double Utilization;
-	public int Rx;
-	public int Max;
-	public string Channel;
+        public double Utilization;
+        public int Rx;
+        public int Max;
+        public string Channel;
     }
 
     MaxEvent _max_event = new MaxEvent() { Utilization = 0.0, Rx = 0, Max = 0, Channel = "" };
@@ -1206,7 +1219,7 @@ class ZIScript {
 	    }
 	    _last_run = LAST_RUN_NONE;
 	    if ((updateSource & UpdateType.Update100) != 0) {
-		//Warning("Issuing times");
+                //Warning("Issuing times");
 		_last_run = LAST_RUN_MAIN;
 		_cycles++;
 
@@ -1227,7 +1240,7 @@ class ZIScript {
 		Log(SCRIPT_TITLE_NL);
 
 		if ((_cycles % 30) == 1) {
-		    //Warning("Looking for updates");
+                    //Warning("Looking for updates");
 		    FindPanels();
 		    CreateDataset(CHART_TIME, "us");
 		    CreateDataset(CHART_MAIN_TIME, "us");
@@ -1240,7 +1253,7 @@ class ZIScript {
 	    }
 
 	    if ((updateSource & (UpdateType.Update1 | UpdateType.Update10 | UpdateType.Update100)) != 0) {
-		//Warning("Running mainloop");
+                //Warning("Running mainloop");
 		_last_run = LAST_RUN_MAIN;
 		if (_mainloop_handler != null) {
 		    _mainloop_handler(updateSource);
@@ -1248,7 +1261,7 @@ class ZIScript {
 	    }
 
 	    if ((updateSource & UpdateType.Update100) != 0) {
-		//Warning("Issuing load/rx/tx/bandwidth");
+                //Warning("Issuing load/rx/tx/bandwidth");
 		double load = (double)(_tallies[LAST_RUN_MAIN].Instr + _tallies[LAST_RUN_EVENT].Instr) * 100.0 / (double)(Prog.Runtime.MaxInstructionCount * (_tallies[LAST_RUN_MAIN].Cycles + _tallies[LAST_RUN_EVENT].Cycles));
 		_tallies[LAST_RUN_MAIN].Instr = 0;
 		_tallies[LAST_RUN_EVENT].Instr = 0;
@@ -1265,43 +1278,43 @@ class ZIScript {
 		IssueDatapoint(CHART_EVENTS_TX, (double)tx);
 
 		Log($"[Cycle {_cycles}]\n  Main loops: {_tallies[LAST_RUN_MAIN].Cycles}. Event loops: {_tallies[LAST_RUN_EVENT].Cycles}\n  Events: {rx} received, {tx} transmitted.\n  {_subscriptions.Count()} event listeners.");
-		Log($"	Max event bandwidth: {_max_event.Utilization}% ({_max_event.Rx} of {_max_event.Max}) on...\n	'{_max_event.Channel}'.");
+                Log($"  Max event bandwidth: {_max_event.Utilization}% ({_max_event.Rx} of {_max_event.Max}) on...\n    '{_max_event.Channel}'.");
 		FlushToPanels(_debug_panels);
 
 		_tallies[LAST_RUN_MAIN].Cycles = 0;
 		_tallies[LAST_RUN_EVENT].Cycles = 0;
-		double utilization = _max_event.Utilization;
-		_max_event.Utilization = 0.0;
-		_max_event.Rx = 0;
-		_max_event.Max = 0;
-		_max_event.Channel = "";
+                double utilization = _max_event.Utilization;
+                _max_event.Utilization = 0.0;
+                _max_event.Rx = 0;
+                _max_event.Max = 0;
+                _max_event.Channel = "";
 
 		IssueDatapoint(CHART_EVENTS_BANDWIDTH, utilization);
 	    }
 
 	    if ((updateSource & UpdateType.IGC) != 0) {
-		//Warning("Consuming events");
+                //Warning("Consuming events");
 		_last_run = LAST_RUN_EVENT;
 		ZIPubSubSubscription subscription;
 		string event_name = argument;
 		if (_subscriptions.TryGetValue(event_name, out subscription)) {
-		    int event_rx = 0;
+                    int event_rx = 0;
 		    while (subscription.Listener.HasPendingMessage) {
 			MyIGCMessage message = subscription.Listener.AcceptMessage();
 			_tallies[_last_run].Rx++;
-			event_rx++;
+                        event_rx++;
 			subscription.Handler(event_name, message.Data);
 		    }
-		    double event_utilization = (double)event_rx * 100.0 / (double)subscription.Listener.MaxWaitingMessages;
-		    if (event_utilization > _max_event.Utilization) {
-			_max_event.Utilization = event_utilization;
-			_max_event.Rx = event_rx;
-			_max_event.Max = subscription.Listener.MaxWaitingMessages;
-			_max_event.Channel = event_name;
-		    }
+                    double event_utilization = (double)event_rx * 100.0 / (double)subscription.Listener.MaxWaitingMessages;
+                    if (event_utilization > _max_event.Utilization) {
+                        _max_event.Utilization = event_utilization;
+                        _max_event.Rx = event_rx;
+                        _max_event.Max = subscription.Listener.MaxWaitingMessages;
+                        _max_event.Channel = event_name;
+                    }
 		}
 	    } else if (argument != null && argument != "") {
-		//Warning("Processing command");
+                //Warning("Processing command");
 		ProcessCommand(argument);
 	    }
 	    if (_last_run != LAST_RUN_NONE) {
