@@ -137,7 +137,10 @@ y | 0 | Panel vertical percentage to start the chart at. 0 is top of the display
 width | 100 | Percent of the panel width to span.
 height | 100 | Percent of the panel height to span.
 chart | no value | If set it will be used for the chart series instead of the section name.
-horizontal | true | If false, the chart will run top to bottom rather than right to left.
+horizontal | true | If false, the chart time axis will run top to bottom rather than right to left.
+flip_horizontal | false | If true will flip the chart left-to-right.
+flip_vertical | false | If true will invert the chart vertically.
+center_zero | false | If true will always center the zero axis in the display rather than have it dynamically move.
 show_title | true | Should the chart title be displayed in the top border?
 show_cur | true | Should the current series value be displayed in the bottom border?
 show_avg | true | Should the average value of the displayed bars be shown?
